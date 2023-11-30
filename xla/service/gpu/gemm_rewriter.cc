@@ -899,6 +899,20 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
           scales_f32[i] = instr->AddInstruction(HloInstruction::CreateConvert(
               ShapeUtil::MakeScalarShape(F32), scales_f32[i]));
         }
+
+        HloInstruction *f32_param = nullptr;
+        if (Match(scales_f32[i],
+                  m::Convert(
+                      m::Bitcast(
+                          m::Convert(m::Op(&f32_param).WithElementType(F32))
+                              .WithElementType(BF16))
+                          .WithElementType(BF16))
+                      .WithElementType(F32))) {
+          HloInstruction *maybe_cast =
+              instr->AddInstruction(HloInstruction::CreateBitcast(
+                  scales_f32[i]->shape(), f32_param));
+          scales_f32[i] = maybe_cast;
+        }
       } else {
         scales_f32[i] = one;
       }
