@@ -5586,6 +5586,78 @@ TEST_P(ParameterizedFp8GemmRewriteTest, ScaledABUnscaledDReluActivationF8) {
       )");
 }
 
+TEST_P(ParameterizedFp8GemmRewriteTest,
+       ScaledABUnscaledDApproxGeluActivationF8) {
+#if GOOGLE_CUDA && CUDA_VERSION < 12000
+  GTEST_SKIP() << "F8 gemm rewrite is only supported in CUDA 12 and above.";
+#endif  // CUDA_VERSION < 12000
+  const char* hlo_text = R"(
+    HloModule test
+
+    ENTRY test {
+      x = f8e4m3fn[16,32] parameter(0)
+      y = f8e4m3fn[32,16] parameter(1)
+      x_f32 = f32[16,32] convert(x)
+      y_f32 = f32[32,16] convert(y)
+      x_scale = f32[] parameter(2)
+      y_scale = f32[] parameter(3)
+      x_scale_bcast = f32[16,32] broadcast(x_scale), dimensions={}
+      y_scale_bcast = f32[32,16] broadcast(y_scale), dimensions={}
+      x_unscaled = f32[16,32] multiply(x_f32, x_scale_bcast)
+      y_unscaled = f32[32,16] multiply(y_f32, y_scale_bcast)
+      dot = f32[16,16] dot(x_unscaled, y_unscaled), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+      mul.0 = f32[16,16] multiply(dot, dot)
+      mul.1 = f32[16,16] multiply(dot, mul.0)
+      const.0 = f32[] constant(0.044715)
+      bcast.0 = f32[16,16] broadcast(const.0), dimensions={}
+      mul.2 = f32[16,16] multiply(mul.1, bcast.0)
+      add.0 = f32[16,16] add(dot, mul.2)
+      const.1 = f32[] constant(0.797884583)
+      bcast.1 = f32[16,16] broadcast(const.1), dimensions={}
+      mul.3 = f32[16,16] multiply(add.0, bcast.1)
+      tanh = f32[16,16] tanh(mul.3)
+      const.2 = f32[] constant(1)
+      bcast.2 = f32[16,16] broadcast(const.2), dimensions={}
+      add.2 = f32[16,16] add(tanh, bcast.2)
+      const.3 = f32[] constant(0.5)
+      bcast.3 = f32[16,16] broadcast(const.3), dimensions={}
+      mul.4 = f32[16,16] multiply(add.2, bcast.3)
+      ROOT out = f32[16,16] multiply(dot, mul.4)
+          }
+
+)";
+
+  CheckFp8IfSupported(hlo_text);
+  RunAndFilecheckHloRewrite(hlo_text, GemmRewriter(CudaHopperOrRocm()),
+                            R"(
+
+; CHECK-LABEL: ENTRY %test (x: f8e4m3fn[16,32], y: f8e4m3fn[32,16], x_scale: f32[], y_scale: f32[]) -> f32[16,16] {
+; CHECK-NEXT:    [[P0:%[^ ]+]] = f8e4m3fn[16,32]{1,0} parameter(0)
+; CHECK-NEXT:    [[P1:%[^ ]+]] = f8e4m3fn[32,16]{1,0} parameter(1)
+; CHECK-NEXT:    [[P1_TRANSPOSE:%[^ ]+]] = f8e4m3fn[16,32]{1,0} transpose([[P1]]), dimensions={1,0}
+; CHECK-NEXT:    [[P2:%[^ ]+]] = f32[] parameter(2)
+; CHECK-NEXT:    [[P3:%[^ ]+]] = f32[] parameter(3)
+; CHECK-NEXT:    [[C1:%[^ ]+]] = f32[] constant(1)
+; CHECK-NEXT:    ROOT [[OUT:%[^ ]+]] = f32[16,16]{1,0} custom-call([[P0]], [[P1_TRANSPOSE]], [[P2]], [[P3]], [[C1]], /*index=5*/[[C1]]),
+; CHECK:           custom_call_target="__cublas$lt$matmul$f8",
+; CHECK:           backend_config={
+; CHECK-DAG:         "alpha_real":1
+; CHECK-DAG:         "alpha_imag":0
+; CHECK-DAG:         "beta":0
+; CHECK-DAG:         "dot_dimension_numbers":{
+; CHECK-DAG:           "lhs_contracting_dimensions":["1"]
+; CHECK-DAG:           "rhs_contracting_dimensions":["1"]
+; CHECK-DAG:           "lhs_batch_dimensions":[]
+; CHECK-DAG:           "rhs_batch_dimensions":[]
+; CHECK-DAG:         }
+; CHECK-DAG:         "precision_config":{
+; CHECK-DAG:           "operand_precision":["DEFAULT","DEFAULT"]
+; CHECK-DAG:         }
+; CHECK-DAG:         "epilogue":"GELU"
+; CHECK:           }
+      )");
+}
+
 TEST_P(ParameterizedFp8GemmRewriteTest, InvScaledABUnscaledDF8) {
 #if GOOGLE_CUDA && CUDA_VERSION < 12000
   GTEST_SKIP() << "F8 gemm rewrite is only supported in CUDA 12 and above.";
