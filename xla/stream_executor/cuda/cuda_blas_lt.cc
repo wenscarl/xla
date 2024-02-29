@@ -133,6 +133,10 @@ absl::StatusOr<cublasLtEpilogue_t> AsCublasLtEpilogue(
       return CUBLASLT_EPILOGUE_GELU_BIAS;
     case gpu::BlasLt::Epilogue::kBiasThenGELUWithAux:
       return CUBLASLT_EPILOGUE_GELU_AUX_BIAS;
+    case gpu::BlasLt::Epilogue::kReLUWithAux:
+      return CUBLASLT_EPILOGUE_RELU_AUX;
+    case gpu::BlasLt::Epilogue::kBiasThenReLUWithAux:
+      return CUBLASLT_EPILOGUE_RELU_AUX_BIAS;
 #else
     case gpu::BlasLt::Epilogue::kGELU:
     case gpu::BlasLt::Epilogue::kGELUWithAux:

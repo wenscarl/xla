@@ -3633,6 +3633,55 @@ ENTRY test {
       )");
 }
 
+TEST_F(CublasLtGemmRewriteTest, ReluActivationWithAux) {
+  if (CudaOrRocmCheck(Switch::False, Switch::True)) {
+    GTEST_SKIP() << "TODO: Unsupported blas-lt epilogue on ROCM";
+  }
+  const char* hlo_text = R"(
+HloModule test
+
+ENTRY test {
+  x = f32[2,3] parameter(0)
+  y = f32[3,4] parameter(1)
+  dy = f32[2,4] parameter(2)
+  dot = f32[2,4] dot(x, y), lhs_contracting_dims={1}, rhs_contracting_dims={0}
+  const.0 = f32[] constant(0)
+  bcast.0 = f32[2,4] broadcast(const.0), dimensions={}
+  maximum.1 = f32[2,4] maximum(dot, bcast.0)
+  compare.0 = pred[2,4] compare(dot, bcast.0), direction=GT
+  ROOT out = (f32[2,4], pred[2,4]) tuple(maximum.1, compare.0)
+}
+
+)";
+
+  EXPECT_TRUE(RunAndCompare(hlo_text, ErrorSpec{1e-5, 1e-5}));
+  MatchOptimizedHlo(hlo_text,
+                    R"(
+
+; CHECK-LABEL: ENTRY %test ({{.*}}: f32[2,3], {{.*}}: f32[3,4], {{.*}}: f32[2,4]) -> (f32[2,4], f32[2,4]) {
+; CHECK-NEXT:    [[P0:%[^ ]+]] = f32[2,3]{1,0} parameter(0)
+; CHECK-NEXT:    [[P1:%[^ ]+]] = f32[3,4]{1,0} parameter(1)
+; CHECK-NEXT:    [[P2:%[^ ]+]] = f32[2,4]{1,0} parameter(2)
+; CHECK-NEXT:    ROOT [[OUT:%[^ ]+]] = (f32[2,4]{1,0}, pred[2,4]{1,0}) custom-call([[P0]], [[P1]]),
+; CHECK:           custom_call_target="__cublas$lt$matmul",
+; CHECK:           backend_config={
+; CHECK-DAG:         "alpha_real":1
+; CHECK-DAG:         "alpha_imag":0
+; CHECK-DAG:         "beta":0
+; CHECK-DAG:         "dot_dimension_numbers":{
+; CHECK-DAG:           "lhs_contracting_dimensions":["1"]
+; CHECK-DAG:           "rhs_contracting_dimensions":["0"]
+; CHECK-DAG:           "lhs_batch_dimensions":[]
+; CHECK-DAG:           "rhs_batch_dimensions":[]
+; CHECK-DAG:         }
+; CHECK-DAG:         "precision_config":{
+; CHECK-DAG:           "operand_precision":["DEFAULT","DEFAULT"]
+; CHECK-DAG:         }
+; CHECK-DAG:         "epilogue":"RELU_AUX"
+; CHECK:           }
+      )");
+}
+
 TEST_F(CublasLtGemmRewriteTest, ApproxGeluActivationBF16) {
   if (!CudaOrRocmCheck(se::CudaComputeCapability::AMPERE, Switch::True)) {
     GTEST_SKIP() << "Padding of GEMM bf16 operands only implemented on "

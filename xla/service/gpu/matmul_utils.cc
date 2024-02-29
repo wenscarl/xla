@@ -695,12 +695,14 @@ absl::StatusOr<bool> EpilogueAddsVectorBias(
   switch (epilogue) {
     case GemmBackendConfig::DEFAULT:
     case GemmBackendConfig::RELU:
+    case GemmBackendConfig::RELU_AUX:
     case GemmBackendConfig::GELU:
     case GemmBackendConfig::GELU_AUX:
       return false;
     case GemmBackendConfig::BIAS:
     case GemmBackendConfig::BIAS_RELU:
     case GemmBackendConfig::BIAS_GELU:
+    case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::BIAS_GELU_AUX:
       return true;
     default:
@@ -718,6 +720,8 @@ absl::StatusOr<bool> EpilogueHasAuxiliaryOutput(
     case GemmBackendConfig::BIAS_RELU:
     case GemmBackendConfig::BIAS_GELU:
       return false;
+    case GemmBackendConfig::RELU_AUX:
+    case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::GELU_AUX:
     case GemmBackendConfig::BIAS_GELU_AUX:
       return true;
@@ -735,6 +739,8 @@ absl::StatusOr<se::gpu::BlasLt::Epilogue> AsBlasLtEpilogue(
       return se::gpu::BlasLt::Epilogue::kReLU;
     case GemmBackendConfig::GELU:
       return se::gpu::BlasLt::Epilogue::kGELU;
+    case GemmBackendConfig::RELU_AUX:
+      return se::gpu::BlasLt::Epilogue::kReLUWithAux;
     case GemmBackendConfig::GELU_AUX:
       return se::gpu::BlasLt::Epilogue::kGELUWithAux;
     case GemmBackendConfig::BIAS:
@@ -743,6 +749,8 @@ absl::StatusOr<se::gpu::BlasLt::Epilogue> AsBlasLtEpilogue(
       return se::gpu::BlasLt::Epilogue::kBiasThenReLU;
     case GemmBackendConfig::BIAS_GELU:
       return se::gpu::BlasLt::Epilogue::kBiasThenGELU;
+    case GemmBackendConfig::BIAS_RELU_AUX:
+      return se::gpu::BlasLt::Epilogue::kBiasThenReLUWithAux;
     case GemmBackendConfig::BIAS_GELU_AUX:
       return se::gpu::BlasLt::Epilogue::kBiasThenGELUWithAux;
     default:

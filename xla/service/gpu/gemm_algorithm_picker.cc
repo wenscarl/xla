@@ -196,6 +196,8 @@ absl::StatusOr<BlasLt::Epilogue> AsBlasLtEpilogue(
       return BlasLt::Epilogue::kGELU;
     case GemmBackendConfig::GELU_AUX:
       return BlasLt::Epilogue::kGELUWithAux;
+    case GemmBackendConfig::RELU_AUX:
+      return BlasLt::Epilogue::kReLUWithAux;
     case GemmBackendConfig::BIAS:
       return BlasLt::Epilogue::kBias;
     case GemmBackendConfig::BIAS_RELU:
@@ -204,6 +206,8 @@ absl::StatusOr<BlasLt::Epilogue> AsBlasLtEpilogue(
       return BlasLt::Epilogue::kBiasThenGELU;
     case GemmBackendConfig::BIAS_GELU_AUX:
       return BlasLt::Epilogue::kBiasThenGELUWithAux;
+    case GemmBackendConfig::BIAS_RELU_AUX:
+      return BlasLt::Epilogue::kBiasThenReLUWithAux;
     default:
       return Internal("Unsupported Epilogue.");
   }

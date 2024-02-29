@@ -794,9 +794,8 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
                           CublasLtMatmulMaybeF8(&existing_gemm).WithOneUser()),
                       m::Bitcast(
                           &optional_slice_or_bitcast,
-                          CublasLtMatmulMaybeF8(&existing_gemm).WithOneUser()),
-                      CublasLtMatmulMaybeF8(&existing_gemm))
-                      .WithOneUser(),
+                          CublasLtMatmulMaybeF8(&existing_gemm)),
+                      CublasLtMatmulMaybeF8(&existing_gemm)),
                   m::Broadcast(&zeros, m::ConstantScalar(0))))) {
       TF_RETURN_IF_ERROR(FuseReluActivation(instr, zeros, existing_gemm,
                                             optional_slice_or_bitcast));
@@ -1493,32 +1492,48 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       return absl::OkStatus();
     }
 
-    if (gemm->user_count() != 1) {
+    int num_gemm_users = gemm->user_count();
+    if (num_gemm_users != 1 && num_gemm_users != 2) {
       return absl::OkStatus();
     }
 
     TF_ASSIGN_OR_RETURN(auto gpu_config,
                         gemm->backend_config<GpuBackendConfig>());
     GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
+
+    bool has_aux = num_gemm_users > 1;
     if (config.epilogue() == GemmBackendConfig::DEFAULT) {
-      config.set_epilogue(GemmBackendConfig::RELU);
+      config.set_epilogue(has_aux ? GemmBackendConfig::RELU_AUX
+                                  : GemmBackendConfig::RELU);
     } else if (config.epilogue() == GemmBackendConfig::BIAS) {
-      config.set_epilogue(GemmBackendConfig::BIAS_RELU);
+      config.set_epilogue(has_aux ? GemmBackendConfig::BIAS_RELU_AUX
+                                  : GemmBackendConfig::BIAS_RELU);
     } else {
       return absl::OkStatus();
     }
 
-    std::unique_ptr<HloInstruction> result = gemm->Clone();
-    TF_RETURN_IF_ERROR(result->set_backend_config(gpu_config));
-    TF_RETURN_IF_ERROR(SetName(result->GetModule(), result.get()));
+
+    std::unique_ptr<HloInstruction> output = gemm->CloneWithNewShape(
+        has_aux ? ShapeUtil::MakeTupleShape({gemm->shape(), gemm->shape()})
+                : gemm->shape());
+    TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
+    TF_RETURN_IF_ERROR(SetName(output->GetModule(), output.get()));
 
     if (slice_or_bitcast) {
-      result = slice_or_bitcast->CloneWithNewOperands(
+      output = slice_or_bitcast->CloneWithNewOperands(
           slice_or_bitcast->shape(),
-          {slice_or_bitcast->parent()->AddInstruction(std::move(result))});
+          {slice_or_bitcast->parent()->AddInstruction(std::move(output))});
     }
 
-    return ReplaceWithNewInstruction(instr, std::move(result));
+    if (has_aux) {
+      HloInstruction *tuple_output =
+          gemm->parent()->AddInstruction(std::move(output));
+      TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
+          gemm, HloInstruction::CreateGetTupleElement(tuple_output, 1)));
+      output = HloInstruction::CreateGetTupleElement(tuple_output, 0);
+    }
+
+    return ReplaceWithNewInstruction(instr, std::move(output));
   }
 
   absl::Status FuseGeluActivation(HloInstruction *multiply,
