@@ -98,6 +98,7 @@ def CublasLtMatmulEpilogueGeluAux : I32EnumAttrCase<"GeluAux", 6>;
 def CublasLtMatmulEpilogueBiasGeluAux : I32EnumAttrCase<"BiasGeluAux", 7>;
 def CublasLtMatmulEpilogueReluAux : I32EnumAttrCase<"ReluAux", 8>;
 def CublasLtMatmulEpilogueBiasReluAux : I32EnumAttrCase<"BiasReluAux", 9>;
+def CublasLtMatmulEpilogueDRelu : I32EnumAttrCase<"DRelu", 10>;
 
 
 def CublasLtMatmulEpilogue: I32EnumAttr<"CublasLtMatmulEpilogue",
@@ -106,7 +107,8 @@ def CublasLtMatmulEpilogue: I32EnumAttr<"CublasLtMatmulEpilogue",
      CublasLtMatmulEpilogueRelu, CublasLtMatmulEpilogueBiasRelu,
      CublasLtMatmulEpilogueGelu, CublasLtMatmulEpilogueBiasGelu,
      CublasLtMatmulEpilogueReluAux, CublasLtMatmulEpilogueBiasReluAux,
-     CublasLtMatmulEpilogueGeluAux, CublasLtMatmulEpilogueBiasGeluAux]> {
+     CublasLtMatmulEpilogueGeluAux, CublasLtMatmulEpilogueBiasGeluAux,
+     CublasLtMatmulEpilogueDRelu]> {
   let genSpecializedAttr = 0;
   let cppNamespace = "::mlir::lmhlo_gpu";
 }

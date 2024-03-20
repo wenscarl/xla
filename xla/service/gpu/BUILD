@@ -3418,6 +3418,7 @@ cc_library(
         ":fusion_merger",
         ":fusion_wrapper",
         ":gemm_broadcast_folding_rewriter",
+        ":gemm_relu_bwd_rewriter",
         ":gemm_rewriter_triton",
         ":gemm_rewriter",
         ":gpu_all_gather_optimizer",
@@ -5004,6 +5005,25 @@ cc_library(
     name = "gemm_broadcast_folding_rewriter",
     srcs = ["gemm_broadcast_folding_rewriter.cc"],
     hdrs = ["gemm_broadcast_folding_rewriter.h"],
+    deps = [
+        ":backend_configs_cc",
+        ":cublas_cudnn",
+        "//xla:status_macros",
+        "//xla:statusor",
+        "//xla/hlo/ir:hlo",
+        "//xla/service:hlo_pass",
+        "//xla/service:pattern_matcher",
+        "@com_google_absl//absl/algorithm:container",
+        "@com_google_absl//absl/status",
+        "@com_google_absl//absl/status:statusor",
+        "@tsl//tsl/platform:errors",
+    ],
+)
+
+cc_library(
+    name = "gemm_relu_bwd_rewriter",
+    srcs = ["gemm_relu_bwd_rewriter.cc"],
+    hdrs = ["gemm_relu_bwd_rewriter.h"],
     deps = [
         ":backend_configs_cc",
         ":cublas_cudnn",

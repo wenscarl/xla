@@ -130,6 +130,7 @@ struct BlasLt {
     kBiasThenGELUWithAux = kBiasThenGELU | 1024,
     kReLUWithAux = 2 | 1024,  // Apply ReLU with auxiliary output.
     kBiasThenReLUWithAux = kBiasThenReLU | 1024,
+    kDReLU = 8 | 128,
   };
 
   // Describes the location of pointers for the scaling factors alpha and beta.

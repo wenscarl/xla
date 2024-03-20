@@ -127,6 +127,7 @@ limitations under the License.
 #include "xla/service/gpu/fusion_merger_triton.h"
 #include "xla/service/gpu/fusion_pipeline.h"
 #include "xla/service/gpu/fusion_wrapper.h"
+#include "xla/service/gpu/gemm_relu_bwd_rewriter.h"
 #include "xla/service/gpu/gemm_broadcast_folding_rewriter.h"
 #include "xla/service/gpu/gemm_rewriter.h"
 #include "xla/service/gpu/gemm_rewriter_triton.h"
@@ -1293,8 +1294,12 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     }
     pipeline.AddPass<GemmRewriter>(gpu_version);
 
+    // Rewrite bwd GEMMs with gradient of ReLU as input.
+    pipeline.AddPass<GemmReLUBwdRewriter>();
+
     // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
     pipeline.AddPass<GemmBroadcastFoldingRewriter>();
+
 
     if (debug_options.xla_gpu_normalize_layouts()) {
       pipeline.AddPass<LayoutNormalization>(&NormalizeLayoutForGpuCustomCalls);
@@ -1353,6 +1358,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // TODO(tdanyluk): Apply CublasPadForGemms to the cuBLAS GEMMs generated
   // here for possibly better cuBLAS performance.
   pipeline.AddPass<GemmRewriter>(gpu_version);
+  // // Rewrite bwd GEMMs with gradient of ReLU as input.
+  pipeline.AddPass<GemmReLUBwdRewriter>();
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
   if (debug_options.xla_gpu_normalize_layouts()) {
@@ -1360,8 +1367,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(simplifier_options);
   }
 
-  TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
-      &pipeline, hlo_module, autotune_config, thread_pool));
+  // TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
+  //     &pipeline, hlo_module, autotune_config, thread_pool));
 
   // The Triton autotuner can insert new bf16 reductions that need to be
   // normalized again.

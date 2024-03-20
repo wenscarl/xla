@@ -1503,18 +1503,27 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
     bool has_aux = num_gemm_users > 1;
     if (config.epilogue() == GemmBackendConfig::DEFAULT) {
+      std::cout << "fffffffffffffff:" << has_aux<<std::endl;
       config.set_epilogue(has_aux ? GemmBackendConfig::RELU_AUX
                                   : GemmBackendConfig::RELU);
     } else if (config.epilogue() == GemmBackendConfig::BIAS) {
+      std::cout << "ggggggggggggg:" << has_aux<<std::endl;
       config.set_epilogue(has_aux ? GemmBackendConfig::BIAS_RELU_AUX
                                   : GemmBackendConfig::BIAS_RELU);
     } else {
       return absl::OkStatus();
     }
 
+    // HloInstruction *mask_output = CreateShape
 
+    int64_t num_e = 1;
+    for (int i= 0 ; i < gemm->shape().rank(); i++){
+      num_e *= gemm->shape().dimensions(i);
+    }
+    Shape mask_shape = ShapeUtil::MakeShape(PrimitiveType::U8, {num_e});//gemm->shape().dimensions());
+    mask_shape.mutable_layout()->set_element_size_in_bits(1);
     std::unique_ptr<HloInstruction> output = gemm->CloneWithNewShape(
-        has_aux ? ShapeUtil::MakeTupleShape({gemm->shape(), gemm->shape()})
+        has_aux ? ShapeUtil::MakeTupleShape({gemm->shape(), mask_shape})
                 : gemm->shape());
     TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
     TF_RETURN_IF_ERROR(SetName(output->GetModule(), output.get()));
@@ -1525,15 +1534,156 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
           {slice_or_bitcast->parent()->AddInstruction(std::move(output))});
     }
 
+    HloInstruction* maybe_compare0 = nullptr;
+    HloInstruction* maybe_compare1 = nullptr;
+    HloInstruction * get_tuple1_p = nullptr;
+    HloInstruction * select = nullptr;
+    HloInstruction * bwdgemm = nullptr;
     if (has_aux) {
+      maybe_compare0 = gemm->users()[0];
+      maybe_compare1 = gemm->users()[1]; // this is compare
+      select = maybe_compare1->users()[0];
+      bwdgemm = select->users()[0];
       HloInstruction *tuple_output =
           gemm->parent()->AddInstruction(std::move(output));
-      TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
-          gemm, HloInstruction::CreateGetTupleElement(tuple_output, 1)));
+
+      std::unique_ptr<HloInstruction> get_tuple1 = HloInstruction::CreateGetTupleElement(tuple_output, 1);
+      get_tuple1_p =  gemm->parent()->AddInstruction(std::move(get_tuple1));
+      std::cout << "here get_tuple1_p:\n" ;
+      std::cout  << get_tuple1_p->ToString()<<std::endl;
+      std::cout << "here select:\n" ;
+      std::cout  << select->ToString()<<std::endl;
+      std::cout << "here bwd gemm:\n" ;
+      std::cout  << bwdgemm->ToString()<<std::endl;
+
+      
+
+      // TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
+      //     gemm, std::move(get_tuple1)));
+      // TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(maybe_compare1, get_tuple1));
+
       output = HloInstruction::CreateGetTupleElement(tuple_output, 0);
     }
+    // std::cout <<"MAXIMUM\n";
+    // std::cout  << instr->ToString()<<std::endl;
+    // std::cout  << instr->users()[0]->ToString()<<std::endl;
+    // std::cout  << instr->users()[1]->ToString()<<std::endl;
+    // std::cout <<"compare\n";
+    // std::cout  << maybe_compare0->ToString()<<std::endl;
+    // std::cout  << maybe_compare1->ToString()<<std::endl;
+      
+    if (has_aux) {
+      std::cout << "2222222\n";
+      
 
-    return ReplaceWithNewInstruction(instr, std::move(output));
+std::cout << "1111111\n";
+std::cout  << maybe_compare1->ToString()<<std::endl;
+std::cout  << get_tuple1_p->ToString()<<std::endl;
+auto xx = ReplaceWithNewInstruction(instr, std::move(output));
+    Shape operand_pred_shape = get_tuple1_p->shape();
+     
+
+
+      // operand_pred_shape.mutable_layout()->set_element_size_in_bits(0);
+      // *operand_pred_shape.mutable_layout() = instr->shape().layout();
+       operand_pred_shape.set_element_type(PRED);
+
+      // std::unique_ptr<HloInstruction> convert_to_pred =
+      //   HloInstruction::CreateConvert(operand_pred_shape, get_tuple1_p);
+
+      HloInstruction *convert_to_pred = gemm->parent()->AddInstruction(HloInstruction::CreateConvert(operand_pred_shape, get_tuple1_p));
+      std::cout <<convert_to_pred->ToString()<<std::endl;
+
+//   Shape new_shape = ShapeUtil::PermuteDimensions({1,0}, convert_to_pred->shape());
+//  *new_shape.mutable_layout() = convert_to_pred->shape().layout();
+
+  std::cout << "44444444444\n";
+     auto bt = HloInstruction::CreateBitcast(maybe_compare1->shape(), convert_to_pred);
+    std::cout << "3333333333\n";
+      std::cout <<bt.get()->ToString()<<std::endl;
+
+      auto yy = ReplaceWithNewInstruction(maybe_compare1, std::move(bt));
+     
+       std::cout  << get_tuple1_p->ToString()<<std::endl;
+
+    Shape new_output_shape = bwdgemm->shape();
+
+
+    HloInstruction* opa =  nullptr;
+    HloInstruction* opb =  nullptr;
+    if (Match(select, m::Select(m::Op(), m::Op(&opa), m::Op()))) {
+    }
+    if (Match(bwdgemm, m::Dot(m::Op(&opb), m::Op()))) {
+    }
+     std::cout << "66666666666666\n";
+    std::vector<HloInstruction *> operands_list = {opa, opb};//, get_tuple1_p};
+
+    // TF_ASSIGN_OR_RETURN(auto bwd_gpu_backend_config,
+    //                     bwdgemm->backend_config<GpuBackendConfig>());
+    // GemmBackendConfig &bwd_config = *bwd_gpu_backend_config.mutable_gemm_backend_config();
+    // bwd_config.set_epilogue(GemmBackendConfig::D_RELU);
+    // std::cout << "777777777777777\n";
+    // std::cout << opa->ToString()<<std::endl;
+    // std::cout << "88888888888\n";
+    //  std::cout << opb->ToString()<<std::endl;
+
+    // HloInstruction *new_bwd_custom_call =
+    //     bwdgemm->parent()->AddInstruction(HloInstruction::CreateCustomCall(
+    //         ShapeUtil::MakeShapeWithDenseLayout(
+    //             bwdgemm->shape().element_type(), new_output_shape.dimensions(),
+    //             bwdgemm->shape().layout().minor_to_major()),
+    //         operands_list, kCublasLtMatmulCallTarget));
+    //         std::cout << "ssssss111111\n";
+    //         std::cout << new_bwd_custom_call->ToString()<<std::endl;
+    // TF_RETURN_IF_ERROR(new_bwd_custom_call->set_backend_config(bwd_gpu_backend_config));
+    // std::cout << "ssssss2222222222\n";
+    // TF_RETURN_IF_ERROR(SetName(bwdgemm->GetModule(), new_bwd_custom_call));
+    //  std::cout << "ssssss\n";
+    //  return xx;
+    // auto zz = ReplaceInstruction(bwdgemm, new_bwd_custom_call);
+ std::cout << "endof relu act\n";
+
+   return yy;
+
+    } else {
+      return ReplaceWithNewInstruction(instr, std::move(output));
+    }
+/*******************/
+//  HloInstruction* maybe_compare0 = nullptr;
+//     HloInstruction* maybe_compare1 = nullptr;
+//     if (has_aux) {
+//       maybe_compare0 = gemm->users()[0];
+//       maybe_compare1 = gemm->users()[1]; // this is compare
+//       HloInstruction *tuple_output =
+//           gemm->parent()->AddInstruction(std::move(output));
+//       std::unique_ptr<HloInstruction> get_tuple1 = HloInstruction::CreateGetTupleElement(tuple_output, 1);
+//       TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
+//           gemm, std::move(get_tuple1)));
+//       output = HloInstruction::CreateGetTupleElement(tuple_output, 0);
+//     }
+//     std::cout <<"MAXIMUM\n";
+//     std::cout  << instr->ToString()<<std::endl;
+//     std::cout  << instr->users()[0]->ToString()<<std::endl;
+//     std::cout  << instr->users()[1]->ToString()<<std::endl;
+//     std::cout <<"compare\n";
+//     std::cout  << maybe_compare0->ToString()<<std::endl;
+//     std::cout  << maybe_compare1->ToString()<<std::endl;
+      
+//     if (has_aux) {
+//       TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(instr, std::move(output)));
+//       Shape operand_pred_shape = instr->shape();
+//       operand_pred_shape.set_element_type(PRED);
+      
+//       std::unique_ptr<HloInstruction> convert_to_pred =
+//         HloInstruction::CreateConvert(operand_pred_shape, maybe_compare1->operands()[0]);
+      
+//       return ReplaceWithNewInstruction(
+//         maybe_compare1, std::move(convert_to_pred)
+//       );
+//     } else {
+//       return ReplaceWithNewInstruction(instr, std::move(output));
+//     }
+  
   }
 
   absl::Status FuseGeluActivation(HloInstruction *multiply,
