@@ -705,6 +705,7 @@ absl::StatusOr<bool> EpilogueAddsVectorBias(
     case GemmBackendConfig::BIAS_GELU:
     case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::BIAS_GELU_AUX:
+    case GemmBackendConfig::D_RELU_BGRAD:
       return true;
     default:
       return Internal("Unknown Epilogue.");
@@ -726,6 +727,7 @@ absl::StatusOr<bool> EpilogueHasAuxiliaryOutput(
     case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::GELU_AUX:
     case GemmBackendConfig::BIAS_GELU_AUX:
+    case GemmBackendConfig::D_RELU_BGRAD:
       return true;
     default:
       return Internal("Unknown Epilogue.");
@@ -747,6 +749,7 @@ absl::StatusOr<bool> EpilogueHasAuxiliaryInput(
     case GemmBackendConfig::BIAS_GELU_AUX:
       return false;
     case GemmBackendConfig::D_RELU:
+    case GemmBackendConfig::D_RELU_BGRAD:
       return true;
     default:
       return Internal("Unknown Epilogue.");
@@ -778,6 +781,8 @@ absl::StatusOr<se::gpu::BlasLt::Epilogue> AsBlasLtEpilogue(
       return se::gpu::BlasLt::Epilogue::kBiasThenGELUWithAux;
     case GemmBackendConfig::D_RELU:
       return se::gpu::BlasLt::Epilogue::kDReLU;
+    case GemmBackendConfig::D_RELU_BGRAD:
+      return se::gpu::BlasLt::Epilogue::kDReLUBGrad;      
     default:
       return Internal("unexpected epilogue value");
   }

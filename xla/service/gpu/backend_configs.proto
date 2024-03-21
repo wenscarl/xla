@@ -98,6 +98,7 @@ message GemmBackendConfig {
     RELU_AUX = 8;
     BIAS_RELU_AUX = 9;
     D_RELU = 10;
+    D_RELU_BGRAD = 11;
   }
 
   Epilogue epilogue = 13;
