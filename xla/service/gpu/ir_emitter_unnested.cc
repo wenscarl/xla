@@ -724,6 +724,9 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
       bool has_aux_output,
       xla::gpu::gpublas_lt::EpilogueHasAuxiliaryOutput(epilogue));
     
+    xla::ShapeIndex output_index =
+        has_aux_output ? xla::ShapeIndex{0} : xla::ShapeIndex{};
+
     TF_ASSIGN_OR_RETURN(bool has_vector_bias,
                         xla::gpu::gpublas_lt::EpilogueAddsVectorBias(epilogue));
 
@@ -732,7 +735,6 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice b,
                       GetAllocationSliceForHlo(instr->operand(1)));
 
-  xla::ShapeIndex output_index = xla::ShapeIndex{};
   BufferAllocation::Slice c;
   TF_ASSIGN_OR_RETURN(c, GetAllocationSliceForHlo(instr, output_index));
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice d,

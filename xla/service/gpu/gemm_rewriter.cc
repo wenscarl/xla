@@ -1493,7 +1493,6 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     HloInstruction *bwd_gemm = nullptr;
     HloInstruction *maximum = nullptr;
     HloInstruction *compare = nullptr;
-    HloInstruction *reduce = nullptr;
 
     if (!Match(instr,
                m::Select(m::Compare(&compare,
@@ -1505,11 +1504,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
                          m::Broadcast(m::ConstantScalar(0))))) {
       return absl::OkStatus();
     }
-    int num_users = instr->user_count();
-    if (num_users !=1 && num_users !=2) {
-      // assume select only has 1 or 2 consumers: dgrad or (dgrad and dbias)
-      return absl::OkStatus();
-    }
+
     if (fwd_gemm->user_count() != 2) {
       // assume fwd_gemm only has 2 consumers: maximum and compare
       return absl::OkStatus();
@@ -1536,14 +1531,6 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     if (!valid_relu_bwd ||
         !SupportsEpilogueFusion(fwd_gemm->shape().element_type())) {
       return absl::OkStatus();
-    }
-    if (num_users == 2) {
-      for (auto user : instr->users()) {
-         if (user->opcode() == HloOpcode::kReduce) {
-          reduce = user;
-          break;
-         }
-      }
     }
       std::cout <<"1111111111111111111\n";
     //  return absl::OkStatus();
@@ -1600,40 +1587,27 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
                         bwd_gemm->backend_config<GpuBackendConfig>());
     GemmBackendConfig &bwd_config =
         *bwd_gpu_backend_config.mutable_gemm_backend_config();
-    bwd_config.set_epilogue(reduce ? GemmBackendConfig::D_RELU_BGRAD : GemmBackendConfig::D_RELU);
+    bwd_config.set_epilogue(GemmBackendConfig::D_RELU);
     TF_RETURN_IF_ERROR(
         new_bwd_custom_call->set_backend_config(bwd_gpu_backend_config));
-    if (reduce && false) {
-      std::cout << "reduce shape" << reduce->ToString() << std::endl;
-      std::unique_ptr<HloInstruction> bwd_output =
-          new_bwd_custom_call->CloneWithNewShape(ShapeUtil::MakeTupleShape(
-              {new_bwd_custom_call->shape(), reduce->shape()}));
-      TF_RETURN_IF_ERROR(bwd_output->set_backend_config(gpu_config));
-      // TF_RETURN_IF_ERROR(SetName(new_bwd_custom_call->GetModule(),
-      // bwd_output.get()));
-      HloInstruction *bwd_tuple_output =
-          instr->parent()->AddInstruction(std::move(bwd_output));
-      std::cout << "4444444444444444444444444\n";
 
-      TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
-          instr, HloInstruction::CreateGetTupleElement(bwd_tuple_output, 0)));
-      return ReplaceWithNewInstruction(
-          reduce, HloInstruction::CreateGetTupleElement(bwd_tuple_output, 1));
-      std::cout << "5555555555555555555555555\n";
-    }
     return ReplaceInstruction(instr, new_bwd_custom_call);
   }
 
   absl::Status HandleReduce(HloInstruction *instr) override {
     HloInstruction *gemm = nullptr;
-    if (Match(instr, m::Reduce(m::CustomCall(&gemm,
-                                             {kCublasLtMatmulCallTarget})))) {
+     std::cout <<"successfuly replce 00000000000000\n";
+     if (Match(instr, m::Reduce(m::CustomCall(&gemm,
+                                              {kCublasLtMatmulCallTarget}), 
+                                m::ConstantScalar(0)))) {
       TF_ASSIGN_OR_RETURN(auto gpu_config,
                           gemm->backend_config<GpuBackendConfig>());
       GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
+       std::cout <<"successfuly replce 111111111111\n";
       if (config.epilogue() != GemmBackendConfig::D_RELU) {
         return absl::OkStatus();
       }
+      std::cout <<"successfuly replce 22222222222\n";
       config.set_epilogue(GemmBackendConfig::D_RELU_BGRAD);
       std::unique_ptr<HloInstruction> output = gemm->CloneWithNewShape(
         ShapeUtil::MakeTupleShape({gemm->shape(), instr->shape()}));
