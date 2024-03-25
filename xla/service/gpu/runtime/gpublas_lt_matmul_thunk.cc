@@ -136,6 +136,7 @@ CublasLtMatmulThunk::GetMatmulAlgorithm(
   absl::MutexLock lock(&matmul_algorithm_cache_mutex_);
   auto it = matmul_algorithm_cache_.find(plan);
   if (it == matmul_algorithm_cache_.end()) {
+    VLOG(2) << "shuw: one step back GetAlgorithms?\n";
     TF_ASSIGN_OR_RETURN(auto algorithms, plan->GetAlgorithms());
     TF_RET_CHECK(algorithm_idx_ >= 0 && algorithm_idx_ < algorithms.size());
     auto algorithm = algorithms[algorithm_idx_];

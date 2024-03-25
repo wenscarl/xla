@@ -1295,7 +1295,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     pipeline.AddPass<GemmRewriter>(gpu_version);
 
     // Rewrite bwd GEMMs with gradient of ReLU as input.
-    // pipeline.AddPass<GemmReLUBwdRewriter>();
+    pipeline.AddPass<GemmReLUBwdRewriter>();
 
     // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
     pipeline.AddPass<GemmBroadcastFoldingRewriter>();
@@ -1359,7 +1359,7 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
   // here for possibly better cuBLAS performance.
   pipeline.AddPass<GemmRewriter>(gpu_version);
   // // Rewrite bwd GEMMs with gradient of ReLU as input.
-  // pipeline.AddPass<GemmReLUBwdRewriter>();
+  pipeline.AddPass<GemmReLUBwdRewriter>();
   // Rewrite GEMMs with broadcasted inputs as strided GEMMs.
   pipeline.AddPass<GemmBroadcastFoldingRewriter>();
   if (debug_options.xla_gpu_normalize_layouts()) {
@@ -1367,8 +1367,8 @@ absl::Status GpuCompiler::OptimizeHloPostLayoutAssignment(
     pipeline.AddPass<HloPassFix<AlgebraicSimplifier>>(simplifier_options);
   }
 
-  // TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
-  //     &pipeline, hlo_module, autotune_config, thread_pool));
+  TF_RETURN_IF_ERROR(AddConvAndGemmAutotuningPasses(
+      &pipeline, hlo_module, autotune_config, thread_pool));
 
   // The Triton autotuner can insert new bf16 reductions that need to be
   // normalized again.

@@ -266,10 +266,12 @@ auto BlasLt::MatmulPlan::GetAlgorithms(size_t max_algorithm_count,
     gpu::ScopedActivateExecutorContext sac{blas_lt_ref_.parent_};
 
     int found_algorithm_count = 0;
+    VLOG(2) << "shuw: before cublasLtMatmulAlgoGetHeuristic\n";
     SE_CUBLAS_RETURN_IF_ERROR(cublasLtMatmulAlgoGetHeuristic(
         blas_lt_ref_.blas_lt_.get(), op_desc_.get(), a_desc_.get(),
         b_desc_.get(), c_desc_.get(), d_desc_.get(), preference.get(),
         max_algorithm_count, results.data(), &found_algorithm_count));
+    VLOG(2) << "shuw: end cublasLtMatmulAlgoGetHeuristic\n";        
     results.resize(found_algorithm_count);
   }
 
@@ -454,6 +456,7 @@ absl::Status BlasLt::MatmulPlan::DoMatmul(
       TF_RETURN_IF_ERROR(SetAttr(op_desc_.get(),
                                  CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER,
                                  aux.opaque()));
+      std::cout << "CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_POINTER!\n";
 
       // Set leading dim and batch stride of auxiliary output to match output.
       // TODO(cjfj): Set this once at initialization.

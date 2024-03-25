@@ -1496,11 +1496,9 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
     if (!Match(instr,
                m::Select(m::Compare(&compare,
-                                    m::CustomCall(&fwd_gemm,
-                                                  {kCublasLtMatmulCallTarget}),
+                                    CublasLtMatmul(&fwd_gemm),
                                     m::Broadcast(m::ConstantScalar(0))),
-                         m::CustomCall(&bwd_gemm, {kCublasLtMatmulCallTarget})
-                             .WithOneUser(),
+                          CublasLtMatmul(&bwd_gemm).WithOneUser(),
                          m::Broadcast(m::ConstantScalar(0))))) {
       return absl::OkStatus();
     }
@@ -1518,9 +1516,12 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
           Match(user,
                 m::MaximumAnyOrder(
                     m::AnyOf<HloInstruction>(
-                        m::Slice(m::CustomCall({kCublasLtMatmulCallTarget})),
-                        m::Bitcast(m::CustomCall({kCublasLtMatmulCallTarget})),
-                        m::CustomCall({kCublasLtMatmulCallTarget})),
+                        m::Slice(m::CustomCall({kCublasLtMatmulCallTarget
+                                                })),
+                        m::Bitcast(m::CustomCall({kCublasLtMatmulCallTarget
+                                                  })),
+                        m::CustomCall({kCublasLtMatmulCallTarget
+                                       })),
                     m::Broadcast(m::ConstantScalar(0))))) {
         maximum = user;
         valid_relu_bwd = true;

@@ -317,7 +317,7 @@ absl::StatusOr<AutotuneResult> DoGemmAutotuneNoCache(
 
     TF_ASSIGN_OR_RETURN(auto plan,
                         BlasLt::GetMatmulPlan(stream, gemm_config, epilogue));
-
+    std::cout << "shuwwwwwwwwwwwwwwwwwwwwwwwwwwwww GetAlgorithm\n";
     TF_ASSIGN_OR_RETURN(auto algorithms, plan->GetAlgorithms());
 
     TF_ASSIGN_OR_RETURN(
