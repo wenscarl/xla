@@ -606,18 +606,12 @@ class LayoutNormalizationVisitor : public DfsHloRewriteVisitor {
     Shape s = hlo->shape();
     HloOpcode opcode = hlo->opcode();
     TF_RET_CHECK(opcode == HloOpcode::kClamp || opcode == HloOpcode::kSelect);
-    // std::cout <<"swwww" << hlo->ToString();
     HloInstruction* p = hlo->mutable_operand(0);
     HloInstruction* i1 = hlo->mutable_operand(1);
     HloInstruction* i2 = hlo->mutable_operand(2);
-    // std::cout << "haha-1" << i2->shape().layout().ToString();
-    // std::cout << "haha0" << i1->shape().layout().ToString();
-    TF_RET_CHECK(i2->shape().layout() == s.layout());
-    TF_RET_CHECK(i1->shape().layout() == s.layout());
-    // std::cout << "haha" << s.layout().ToString();
-    // std::cout << "haha2" << p->shape().layout().ToString();
-    // std::cout << "\n";
     TF_RET_CHECK(p->shape().layout() == s.layout());
+    TF_RET_CHECK(i1->shape().layout() == s.layout());
+    TF_RET_CHECK(i2->shape().layout() == s.layout());
 
     TF_ASSIGN_OR_RETURN(HloInstruction * p_0, GetNormalizedInput(p));
     TF_ASSIGN_OR_RETURN(HloInstruction * i1_0, GetNormalizedInput(i1));

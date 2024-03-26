@@ -271,9 +271,10 @@ auto BlasLt::MatmulPlan::GetAlgorithms(size_t max_algorithm_count,
 
     gpu::ScopedActivateExecutorContext sac{blas_lt_ref_.parent_};
     
-    auto mm = op_desc_.epilogue_type();
-    VLOG(2) << "shuw: mm=" <<mm<<std::endl;
-    if (mm==130) {
+    auto epilogue = op_desc_.epilogue_type();
+    VLOG(2) << "shuw: epilogue=" << epilogue << std::endl;
+    if (epilogue == CUBLASLT_EPILOGUE_RELU_AUX ||
+        epilogue == CUBLASLT_EPILOGUE_RELU_AUX_BIAS) {
       TF_ASSIGN_OR_RETURN(
           int64_t output_leading_dim,
           GetAttr<int64_t>(d_desc_.get(), CUBLASLT_MATRIX_LAYOUT_LD));
