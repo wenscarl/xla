@@ -291,28 +291,29 @@ std::cout << "shuw:in side F8CnvertD 10000000000000000\n";
                 m::Broadcast(m::ConstantScalar(&clamp_upper)))))) {
       return ReluConvertDF8(instr, existing_gemm, d_scale, clamp_lower, clamp_upper,
                             maximum);
-     } else if (Match(
-                   instr,
-                   m::Convert(
-                       m::Clamp(
-                           m::Broadcast(m::ConstantScalar(&clamp_lower)),
-                           m::AnyOf<HloInstruction>(
-                               m::Divide(
-                                   &binary,
-                                   m::CustomCall(&existing_gemm,
-                                                 {kCublasLtMatmulF8CallTarget}),
-                                   m::Broadcast(m::Op(&d_scale))),
-                               m::MultiplyAnyOrder(
-                                   &binary,
-                                   m::CustomCall(&existing_gemm,
-                                                 {kCublasLtMatmulF8CallTarget}),
-                                   m::Broadcast(m::Op(&d_scale)))),
-                           m::Broadcast(m::ConstantScalar(&clamp_upper)))
-                           .WithOneUser()))) {
-      return F8ConvertD(
-          instr, existing_gemm, d_scale, clamp_lower, clamp_upper,
-          /*mult_scale=*/binary->opcode() == HloOpcode::kMultiply);
-    }
+     } 
+    //  else if (Match(
+    //                instr,
+    //                m::Convert(
+    //                    m::Clamp(
+    //                        m::Broadcast(m::ConstantScalar(&clamp_lower)),
+    //                        m::AnyOf<HloInstruction>(
+    //                            m::Divide(
+    //                                &binary,
+    //                                m::CustomCall(&existing_gemm,
+    //                                              {kCublasLtMatmulF8CallTarget}),
+    //                                m::Broadcast(m::Op(&d_scale))),
+    //                            m::MultiplyAnyOrder(
+    //                                &binary,
+    //                                m::CustomCall(&existing_gemm,
+    //                                              {kCublasLtMatmulF8CallTarget}),
+    //                                m::Broadcast(m::Op(&d_scale)))),
+    //                        m::Broadcast(m::ConstantScalar(&clamp_upper)))
+    //                        .WithOneUser()))) {
+    //   return F8ConvertD(
+    //       instr, existing_gemm, d_scale, clamp_lower, clamp_upper,
+    //       /*mult_scale=*/binary->opcode() == HloOpcode::kMultiply);
+    // }
     return absl::OkStatus();
   }
 

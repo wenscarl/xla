@@ -124,8 +124,7 @@ absl::StatusOr<se::gpu::BlasLt::MatmulPlan*> CublasLtMatmulThunk::GetMatmulPlan(
   auto it = matmul_plans_cache_.find(stream);
   if (it == matmul_plans_cache_.end()) {
     TF_ASSIGN_OR_RETURN(auto plan, se::gpu::BlasLt::GetMatmulPlan(
-            stream, gemm_config_, se::gpu::BlasLt::Epilogue::kDefault));
-                                      //  stream, gemm_config_, epilogue_));
+                                       stream, gemm_config_, epilogue_));
     it = matmul_plans_cache_.emplace(stream, std::move(plan)).first;
   }
   return it->second.get();

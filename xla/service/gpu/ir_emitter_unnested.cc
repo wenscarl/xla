@@ -920,7 +920,9 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
     TF_ASSIGN_OR_RETURN(
       bool has_aux_output,
       xla::gpu::gpublas_lt::EpilogueHasAuxiliaryOutput(epilogue));
-
+    TF_ASSIGN_OR_RETURN(
+      bool has_aux_input,
+      xla::gpu::gpublas_lt::EpilogueHasAuxiliaryInput(epilogue));
     TF_ASSIGN_OR_RETURN(bool has_vector_bias,
                         xla::gpu::gpublas_lt::EpilogueAddsVectorBias(epilogue));
     bool has_damax = instr->shape().IsTuple();
@@ -962,7 +964,10 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
     }
 
     BufferAllocation::Slice aux;  // Not used.
-
+    if (has_aux_input) {
+      std::cout <<"shuw::::::" << "yes aux input in last one!\n";
+      TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr->operand(instr->operand_count()-1)));
+    }
     BufferAllocation::Slice d_amax;
     if (has_damax) {
       TF_ASSIGN_OR_RETURN(d_amax, GetAllocationSliceForHlo(instr, {1}));
@@ -987,8 +992,8 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
         c_scale, d_scale, d_amax);
     AddThunkToThunkSequence(std::move(thunk));
     
-    std::cout << "d_amax == nullptr ? :" <<d_amax <<std::endl;
-    // std::cout << "aux == nullptr ? :" << aux <<std::endl;
+    // std::cout << "d_amax == nullptr ? :" <<d_amax <<std::endl;
+    std::cout << "aux == nullptr ? :" << aux <<std::endl;
     // std::cout << "bias == nullptr ? :" << bias <<std::endl;
     std::cout << "shuw: here end in D_RELU epilog\n";
     return absl::OkStatus();
