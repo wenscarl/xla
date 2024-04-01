@@ -673,8 +673,10 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
                       instr->backend_config<xla::gpu::GpuBackendConfig>());
   xla::gpu::GemmBackendConfig config = gpu_config.gemm_backend_config();
   xla::gpu::GemmBackendConfig_Epilogue epilogue = config.epilogue();
-  bool is_drelu_epilogue = (epilogue == GemmBackendConfig::D_RELU ||
-                            epilogue == GemmBackendConfig::D_RELU_BGRAD);
+
+  TF_ASSIGN_OR_RETURN(
+      bool is_forward_mode,
+      xla::gpu::gpublas_lt::EpilogueForForward(epilogue));                            
   TF_ASSIGN_OR_RETURN(bool has_vector_bias,
                       xla::gpu::gpublas_lt::EpilogueAddsVectorBias(epilogue));
   bool has_matrix_bias = config.beta() != 0;
@@ -684,30 +686,29 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
   TF_ASSIGN_OR_RETURN(
       bool has_aux_input,
       xla::gpu::gpublas_lt::EpilogueHasAuxiliaryInput(epilogue));
-  if (is_drelu_epilogue) {
-    TF_RET_CHECK(instr->operand_count() == 2 + int{has_aux_input});
-  } else {
+  if (is_forward_mode) {
     TF_RET_CHECK(instr->operand_count() ==
                  2 + int{has_matrix_bias} + int{has_vector_bias});
+  } else {
+    TF_RET_CHECK(instr->operand_count() == 2 + int{has_aux_input});
   }
-  xla::ShapeIndex output_index =
-      has_aux_output ? xla::ShapeIndex{0} : xla::ShapeIndex{};
+
+  xla::ShapeIndex output_index;
+  if (is_forward_mode) {
+    output_index = has_aux_output ? xla::ShapeIndex{0} : xla::ShapeIndex{};
+  } else {
+    output_index = (epilogue == GemmBackendConfig::D_RELU_BGRAD)
+                       ? xla::ShapeIndex{0}
+                       : xla::ShapeIndex{};
+  }
+
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice a,
                       GetAllocationSliceForHlo(instr->operand(0)));
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice b,
                       GetAllocationSliceForHlo(instr->operand(1)));
 
   BufferAllocation::Slice aux, bias, c;
-  if (is_drelu_epilogue) {
-    TF_ASSIGN_OR_RETURN(c, GetAllocationSliceForHlo(instr, output_index));
-    if (has_vector_bias && has_aux_output) {  // DRELU_BGRAD
-      TF_ASSIGN_OR_RETURN(bias, GetAllocationSliceForHlo(instr, {1}));
-    }
-
-    if (has_aux_input) {
-      TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr->operand(2)));
-    }
-  } else {
+  if (is_forward_mode) {
     if (has_matrix_bias) {
       TF_ASSIGN_OR_RETURN(c, GetAllocationSliceForHlo(instr->operand(2)));
     } else {
@@ -720,6 +721,15 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
     }
     if (has_aux_output) {
       TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr, {1}));
+    }
+  } else {
+    TF_ASSIGN_OR_RETURN(c, GetAllocationSliceForHlo(instr, output_index));
+    if (epilogue == GemmBackendConfig::D_RELU_BGRAD) {
+      TF_ASSIGN_OR_RETURN(bias, GetAllocationSliceForHlo(instr, {1}));
+    }
+
+    if (has_aux_input) {
+      TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr->operand(2)));
     }
   }
 

@@ -3750,7 +3750,7 @@ ENTRY test {
 ; CHECK-LABEL: ENTRY %test ({{.*}}: f32[128,128], {{.*}}: f32[128,128], {{.*}}: f32[128,128], {{.*}}: f32[128,128]) -> (f32[128,128], f32[128,128]) {
 ; CHECK-NEXT:    [[P0:%[^ ]+]] = f32[128,128]{1,0} parameter(0)
 ; CHECK-NEXT:    [[P1:%[^ ]+]] = f32[128,128]{1,0} parameter(1)
-; CHECK-NEXT:    [[OUT0:%[^ ]+]] = (f32[128,128]{1,0}, u8[16384]{0:E(1)}) custom-call([[P0]], [[P1]]),
+; CHECK-NEXT:    [[OUT0:%[^ ]+]] = (f32[128,128]{1,0}, u8[2048]{0}) custom-call([[P0]], [[P1]]),
 ; CHECK:           custom_call_target="__cublas$lt$matmul",
 ; CHECK:           backend_config={
 ; CHECK-DAG:         "alpha_real":1
@@ -3770,7 +3770,7 @@ ENTRY test {
 ; CHECK-NEXT:    [[GETT:%[^ ]+]] = f32[128,128]{1,0} get-tuple-element([[OUT0]]), index=0
 ; CHECK-NEXT:    [[P2:%[^ ]+]] = f32[128,128]{1,0} parameter(2)
 ; CHECK-NEXT:    [[P3:%[^ ]+]] = f32[128,128]{1,0} parameter(3)
-; CHECK-NEXT:    [[GETT1:%[^ ]+]] = u8[16384]{0:E(1)} get-tuple-element([[OUT0]]), index=1
+; CHECK-NEXT:    [[GETT1:%[^ ]+]] = u8[2048]{0} get-tuple-element([[OUT0]]), index=1
 ; CHECK-NEXT:    [[OUT1:%[^ ]+]] = f32[128,128]{1,0} custom-call([[P2]], [[P3]], [[GETT1]]),
 ; CHECK:           custom_call_target="__cublas$lt$matmul",
 ; CHECK:           backend_config={
@@ -3835,7 +3835,7 @@ ENTRY test {
 ; CHECK-NEXT:    [[P0:%[^ ]+]] = f32[128,128]{1,0} parameter(0)
 ; CHECK-NEXT:    [[P1:%[^ ]+]] = f32[128,128]{1,0} parameter(1)
 ; CHECK-NEXT:    [[BIAS:%[^ ]+]] = f32[128]{0} parameter(4)
-; CHECK-NEXT:    [[OUT0:%[^ ]+]] = (f32[128,128]{1,0}, u8[16384]{0:E(1)}) custom-call([[P0]], [[P1]], [[BIAS]]),
+; CHECK-NEXT:    [[OUT0:%[^ ]+]] = (f32[128,128]{1,0}, u8[2048]{0}) custom-call([[P0]], [[P1]], [[BIAS]]),
 ; CHECK:           custom_call_target="__cublas$lt$matmul",
 ; CHECK:           backend_config={
 ; CHECK-DAG:         "alpha_real":1
@@ -3855,7 +3855,7 @@ ENTRY test {
 ; CHECK-NEXT:    [[GETT:%[^ ]+]] = f32[128,128]{1,0} get-tuple-element([[OUT0]]), index=0
 ; CHECK-NEXT:    [[P2:%[^ ]+]] = f32[128,128]{1,0} parameter(2)
 ; CHECK-NEXT:    [[P3:%[^ ]+]] = f32[128,128]{1,0} parameter(3)
-; CHECK-NEXT:    [[GETT1:%[^ ]+]] = u8[16384]{0:E(1)} get-tuple-element([[OUT0]]), index=1
+; CHECK-NEXT:    [[GETT1:%[^ ]+]] = u8[2048]{0} get-tuple-element([[OUT0]]), index=1
 ; CHECK-NEXT:    [[OUT1:%[^ ]+]] = (f32[128,128]{1,0}, f32[128]{0}) custom-call([[P2]], [[P3]], [[GETT1]]),
 ; CHECK:           custom_call_target="__cublas$lt$matmul",
 ; CHECK:           backend_config={
