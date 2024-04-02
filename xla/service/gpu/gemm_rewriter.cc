@@ -885,12 +885,20 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     return absl::OkStatus();
   }
 
+  // Attempt to match the prescribed patterns associated with ReLU and its
+  // gradient:
+  // y1 = matmul1(x1, weight1)
+  // y2 = relu(y1)
+  // y3 = matmul2(y2, weight2)
+  // and its corresponding backward pass
+  // dy1 = grad_matmul2(dy, weight2)
+  // dy2 = drelu(dy1)
+  // dy3 = grad_matmul1(dy2, weight1)
+  // In the forward pass, fuse ReLU into matmul1 as an epilogue and generate a
+  // bitmask for subsequent use in grad_matmul2. For the backward pass,
+  // streamline and combine the ReLU gradient computation with grad_matmul2 as
+  // an epilogue.
   absl::Status HandleSelect(HloInstruction *instr) override {
-    // Attempt to elide select and fuse gradient of ReLU into GEMM as epilogue.
-    // Rewrite the matmul as producer of bitmask into relu with Aux.
-    // 1. Check for both fwd and bwd pattern.
-    // 2. Rewrite ReLU with ReLUAux;
-    // 3. Insert DRelu as epiloguefor backward matmul.
     HloInstruction *fwd_gemm = nullptr;
     HloInstruction *bwd_gemm = nullptr;
     HloInstruction *maximum = nullptr;
