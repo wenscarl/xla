@@ -229,8 +229,7 @@ cudaDataType_t BlasLt::MatrixLayout::type() const {
 
 cublasLtEpilogue_t BlasLt::MatmulDesc::epilogue_type() const {
   return static_cast<cublasLtEpilogue_t>(
-      GetAttr<int32_t>(handle_.get(), CUBLASLT_MATMUL_DESC_EPILOGUE)
-          .value());
+      GetAttr<int32_t>(handle_.get(), CUBLASLT_MATMUL_DESC_EPILOGUE).value());
 }
 
 cublasComputeType_t BlasLt::MatmulDesc::compute_type() const {
@@ -283,7 +282,7 @@ auto BlasLt::MatmulPlan::GetAlgorithms(size_t max_algorithm_count,
       TF_RETURN_IF_ERROR(SetAttr(op_desc_.get(),
                                  CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD,
                                  output_leading_dim));
-    }    
+    }
 
     int found_algorithm_count = 0;
     SE_CUBLAS_RETURN_IF_ERROR(cublasLtMatmulAlgoGetHeuristic(

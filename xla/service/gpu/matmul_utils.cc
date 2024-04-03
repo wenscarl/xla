@@ -823,7 +823,7 @@ absl::StatusOr<bool> EpilogueForForward(GemmBackendConfig_Epilogue epilogue) {
     case GemmBackendConfig::RELU_AUX:
     case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::GELU_AUX:
-    case GemmBackendConfig::BIAS_GELU_AUX:    
+    case GemmBackendConfig::BIAS_GELU_AUX:
       return true;
     case GemmBackendConfig::D_RELU:
     case GemmBackendConfig::D_RELU_BGRAD:

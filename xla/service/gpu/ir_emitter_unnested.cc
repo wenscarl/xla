@@ -674,9 +674,8 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunk(
   xla::gpu::GemmBackendConfig config = gpu_config.gemm_backend_config();
   xla::gpu::GemmBackendConfig_Epilogue epilogue = config.epilogue();
 
-  TF_ASSIGN_OR_RETURN(
-      bool is_forward_mode,
-      xla::gpu::gpublas_lt::EpilogueForForward(epilogue));                            
+  TF_ASSIGN_OR_RETURN(bool is_forward_mode,
+                      xla::gpu::gpublas_lt::EpilogueForForward(epilogue));
   TF_ASSIGN_OR_RETURN(bool has_vector_bias,
                       xla::gpu::gpublas_lt::EpilogueAddsVectorBias(epilogue));
   bool has_matrix_bias = config.beta() != 0;
