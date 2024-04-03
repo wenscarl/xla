@@ -2396,8 +2396,6 @@ absl::StatusOr<bool> RunOnComputation(HloComputation *computation,
                                       bool f8_rewrite) {
   GemmRewriterVisitor visitor(gpu_version, f8_rewrite);
   TF_RETURN_IF_ERROR(computation->Accept(&visitor));
-  // To fuse ReLU backward
-  // TF_RETURN_IF_ERROR(computation->Accept(&visitor));
   GemmWorkspaceRewriteVisitor workspace_visitor(gpu_version);
   TF_RETURN_IF_ERROR(computation->Accept(&workspace_visitor));
   return visitor.changed();
