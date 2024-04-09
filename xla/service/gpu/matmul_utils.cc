@@ -755,6 +755,7 @@ absl::StatusOr<bool> EpilogueAddsVectorBias(
     case GemmBackendConfig::GELU:
     case GemmBackendConfig::GELU_AUX:
     case GemmBackendConfig::D_RELU:
+    case GemmBackendConfig::D_GELU:
       return false;
     case GemmBackendConfig::BIAS:
     case GemmBackendConfig::BIAS_RELU:
@@ -762,6 +763,7 @@ absl::StatusOr<bool> EpilogueAddsVectorBias(
     case GemmBackendConfig::BIAS_RELU_AUX:
     case GemmBackendConfig::BIAS_GELU_AUX:
     case GemmBackendConfig::D_RELU_BGRAD:
+    case GemmBackendConfig::D_GELU_BGRAD:
       return true;
     default:
       return Internal("Unknown Epilogue.");
@@ -779,6 +781,8 @@ absl::StatusOr<bool> EpilogueHasAuxiliaryOutput(
     case GemmBackendConfig::BIAS_GELU:
     case GemmBackendConfig::D_RELU:
     case GemmBackendConfig::D_RELU_BGRAD:
+    case GemmBackendConfig::D_GELU:
+    case GemmBackendConfig::D_GELU_BGRAD:    
       return false;
     case GemmBackendConfig::RELU_AUX:
     case GemmBackendConfig::BIAS_RELU_AUX:
@@ -806,6 +810,8 @@ absl::StatusOr<bool> EpilogueHasAuxiliaryInput(
       return false;
     case GemmBackendConfig::D_RELU:
     case GemmBackendConfig::D_RELU_BGRAD:
+    case GemmBackendConfig::D_GELU:
+    case GemmBackendConfig::D_GELU_BGRAD:    
       return true;
     default:
       return Internal("Unknown Epilogue.");
@@ -827,6 +833,8 @@ absl::StatusOr<bool> EpilogueForForward(GemmBackendConfig_Epilogue epilogue) {
       return true;
     case GemmBackendConfig::D_RELU:
     case GemmBackendConfig::D_RELU_BGRAD:
+    case GemmBackendConfig::D_GELU:
+    case GemmBackendConfig::D_GELU_BGRAD:    
       return false;
     default:
       return Internal("Unknown Epilogue.");
@@ -859,7 +867,11 @@ absl::StatusOr<se::gpu::BlasLt::Epilogue> AsBlasLtEpilogue(
     case GemmBackendConfig::D_RELU:
       return se::gpu::BlasLt::Epilogue::kDReLU;
     case GemmBackendConfig::D_RELU_BGRAD:
-      return se::gpu::BlasLt::Epilogue::kDReLUBGrad;      
+      return se::gpu::BlasLt::Epilogue::kDReLUBGrad;
+    case GemmBackendConfig::D_GELU:
+      return se::gpu::BlasLt::Epilogue::kDGELU;
+    case GemmBackendConfig::D_GELU_BGRAD:
+      return se::gpu::BlasLt::Epilogue::kDGELUBGrad;      
     default:
       return Internal("unexpected epilogue value");
   }

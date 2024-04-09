@@ -274,7 +274,9 @@ auto BlasLt::MatmulPlan::GetAlgorithms(size_t max_algorithm_count,
     auto epilogue = op_desc_.epilogue_type();
     VLOG(2) << "shuw: epilogue=" << epilogue << std::endl;
     if (epilogue == CUBLASLT_EPILOGUE_RELU_AUX ||
-        epilogue == CUBLASLT_EPILOGUE_RELU_AUX_BIAS) {
+        epilogue == CUBLASLT_EPILOGUE_RELU_AUX_BIAS ||
+        epilogue == CUBLASLT_EPILOGUE_GELU_AUX ||
+        epilogue == CUBLASLT_EPILOGUE_GELU_AUX_BIAS) {
       TF_ASSIGN_OR_RETURN(
           int64_t output_leading_dim,
           GetAttr<int64_t>(d_desc_.get(), CUBLASLT_MATRIX_LAYOUT_LD));

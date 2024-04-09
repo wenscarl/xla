@@ -780,6 +780,10 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
                            epilogue == GemmBackendConfig::D_RELU ||
                            epilogue == GemmBackendConfig::BIAS_RELU_AUX ||
                            epilogue == GemmBackendConfig::D_RELU_BGRAD);
+  bool is_gelu_epilogue = (epilogue == GemmBackendConfig::GELU_AUX ||
+                           epilogue == GemmBackendConfig::D_GELU ||
+                           epilogue == GemmBackendConfig::BIAS_GELU_AUX ||
+                           epilogue == GemmBackendConfig::D_GELU_BGRAD);                           
   xla::ShapeIndex output_index =
       has_tuple_output ? xla::ShapeIndex{0} : xla::ShapeIndex{};
   TF_ASSIGN_OR_RETURN(BufferAllocation::Slice a,
@@ -807,36 +811,29 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
       BufferAllocation::Slice d_scale,
       GetAllocationSliceForHlo(instr->operand(a_scale_index + 3)));
   BufferAllocation::Slice aux, bias, d_amax;
-  if (!is_relu_epilogue) {
-    if (has_vector_bias) {
-      TF_ASSIGN_OR_RETURN(
-          bias, GetAllocationSliceForHlo(instr->operand(a_scale_index + 4)));
-    }
+  if (has_vector_bias) {
+    TF_ASSIGN_OR_RETURN(bias, epilogue == GemmBackendConfig::D_RELU_BGRAD
+                                  ? GetAllocationSliceForHlo(instr, {1})
+                                  : GetAllocationSliceForHlo(
+                                        instr->operand(a_scale_index + 4)));
+  }
+  if (!is_relu_epilogue && !is_gelu_epilogue) {
+
     bool has_damax = has_tuple_output;
     if (has_damax) {
       TF_ASSIGN_OR_RETURN(d_amax, GetAllocationSliceForHlo(instr, {1}));
     }
 
     // aux not used.
-  } else if (epilogue == GemmBackendConfig::D_RELU) {  // D_RELU
+  } else if (epilogue == GemmBackendConfig::D_RELU || epilogue == GemmBackendConfig::D_GELU) {  // D_RELU
     // cublasLt does not support fp8 output for D_RELU or D_RELU_BGRAD
-    if (has_vector_bias) {
-      TF_ASSIGN_OR_RETURN(
-          bias, GetAllocationSliceForHlo(instr->operand(a_scale_index + 4)));
-    }
-
     if (has_aux_input) {
       TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(
                                    instr->operand(instr->operand_count() - 1)));
     }
     // d_amax not used.
-  } else if (epilogue == GemmBackendConfig::RELU_AUX) {
+  } else if (epilogue == GemmBackendConfig::RELU_AUX || epilogue == GemmBackendConfig::GELU_AUX) {
     BufferAllocation::Slice bias;
-    if (has_vector_bias) {
-      TF_ASSIGN_OR_RETURN(
-          bias, GetAllocationSliceForHlo(instr->operand(a_scale_index + 4)));
-    }
-
     if (has_aux_output) {
       TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr, {1}));
     }
@@ -845,23 +842,14 @@ absl::Status IrEmitterUnnested::EmitCublasLtMatmulThunkF8(
     if (has_damax) {
       TF_ASSIGN_OR_RETURN(d_amax, GetAllocationSliceForHlo(instr, {2}));
     }
-  } else if (epilogue == GemmBackendConfig::D_RELU_BGRAD) {
-    if (has_vector_bias) {  // DRELU_BGRAD
-      TF_ASSIGN_OR_RETURN(bias, GetAllocationSliceForHlo(instr, {1}));
-    }
-
+  } else if (epilogue == GemmBackendConfig::D_RELU_BGRAD || epilogue == GemmBackendConfig::D_GELU_BGRAD) {
     if (has_aux_input) {
       TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(
                                    instr->operand(instr->operand_count() - 1)));
     }
     // d_amax not used.
     // aux Not used.
-  } else if (epilogue == GemmBackendConfig::BIAS_RELU_AUX) {
-    if (has_vector_bias) {
-      TF_ASSIGN_OR_RETURN(
-          bias, GetAllocationSliceForHlo(instr->operand(a_scale_index + 4)));
-    }
-
+  } else if (epilogue == GemmBackendConfig::BIAS_RELU_AUX || epilogue == GemmBackendConfig::BIAS_GELU_AUX) {
     if (has_aux_output) {
       TF_ASSIGN_OR_RETURN(aux, GetAllocationSliceForHlo(instr, {1}));
     }

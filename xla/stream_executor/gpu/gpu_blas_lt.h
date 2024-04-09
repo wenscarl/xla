@@ -135,6 +135,8 @@ struct BlasLt {
     kBiasThenReLUWithAux = kBiasThenReLU | 1024,
     kDReLU = 8 | 128,
     kDReLUBGrad = kDReLU | 16,
+    kDGELU = 64 | 128,
+    kDGELUBGrad = kDGELU | 16,    
   };
 
   // Describes the location of pointers for the scaling factors alpha and beta.

@@ -656,7 +656,8 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
                              m::Bitcast(&slice_or_bitcast,
                                         CublasLtMatmulMaybeF8(&existing_gemm)),
                              CublasLtMatmulMaybeF8(&existing_gemm)),
-                         m::Op(&cdf).WithOneUser())) &&
+                        //  m::Op(&cdf).WithOneUser())) && // cdf has 2
+                         m::Op(&cdf))) &&
         Match(cdf,
               m::MultiplyAnyOrder(
                   BcastConstScalar(0.5),
@@ -681,14 +682,29 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
                                               m::Op().Is(slice_or_bitcast
                                                              ? slice_or_bitcast
                                                              : existing_gemm))
-                                              .WithOneUser())
+                                      )
+                                              // .WithOneUser())//2 users
                                           .WithOneUser())
                                       .WithOneUser())
                                   .WithOneUser())
                               .WithOneUser())
-                          .WithOneUser())))) {
-      return FuseGeluActivation(instr, existing_gemm, slice_or_bitcast);
-    }
+                          // .WithOneUser())))) { // tanh has 3
+                          )))) {
+      // return FuseGeluActivation(instr, existing_gemm, slice_or_bitcast);
+      VLOG(1) << "shuw: gelu good\n";
+      HloInstruction *other, *bwd_gemm;
+      for (auto m : cdf->users()){
+        if (m != instr) {
+          other = m;
+          break;
+        }
+      }
+      if (Match(other, m::MultiplyAnyOrder(m::Op(&cdf),CublasLtMatmulMaybeF8(&bwd_gemm) )) &&
+       other->users()[0]->users()[0]->opcode() == HloOpcode::kAdd)  {
+        VLOG(1) << "shuw: gelu good2\n";
+        return FuseGeluActivationBwd(instr, other->users()[0]->users()[0], existing_gemm, bwd_gemm);
+      }
+      }
     return absl::OkStatus();
   }
 
@@ -1352,7 +1368,9 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       // TODO(wenscarl) The cublasLt fp8 matmul does not yet handle DRELU or
       // DRELU_BGRAD epilogue with fp8 type output.
       if (config.epilogue() == GemmBackendConfig::D_RELU ||
-          config.epilogue() == GemmBackendConfig::D_RELU_BGRAD) {
+          config.epilogue() == GemmBackendConfig::D_GELU ||
+          config.epilogue() == GemmBackendConfig::D_RELU_BGRAD ||
+          config.epilogue() == GemmBackendConfig::D_GELU_BGRAD) {
         return absl::OkStatus();
       }
       for (int i = 0; i < gemm_users.size(); ++i) {
@@ -1798,6 +1816,71 @@ absl::Status FuseReluActivation(HloInstruction *instr,
     }
 
     return ReplaceWithNewInstruction(instr, std::move(result));
+  }
+
+absl::Status FuseGeluActivationBwd(HloInstruction *multiply, HloInstruction *final_add,
+                                  HloInstruction *gemm, HloInstruction *bwd_gemm) {
+    if (!SupportsEpilogueFusion(gemm->shape().element_type())) {
+      return absl::OkStatus();
+    }
+
+// #if CUDA_VERSION < 12040
+//     // For CUDA versions less than 12.3.2, cuBLAS LT returns
+//     // CUBLAS_STATUS_NOT_SUPPORTED in some cases when fusing gelu into an FP8
+//     // matmul. We cannot check the patch version, so disable this fusion with
+//     // CUDA versions less than 12.4.
+//     if (IsCublasLtMatmulF8(*gemm)) {
+//       return absl::OkStatus();
+//     }
+// #endif
+
+    // There are 4 users of the gemm output within the GELU calculation.
+    bool has_aux = gemm->user_count() > 4;
+    VLOG(1) << "shuw 1111111111111111111\n";
+    TF_ASSIGN_OR_RETURN(auto gpu_config,
+                        gemm->backend_config<GpuBackendConfig>());
+    GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
+
+    if (config.epilogue() == GemmBackendConfig::DEFAULT) {
+      config.set_epilogue(has_aux ? GemmBackendConfig::GELU_AUX
+                                  : GemmBackendConfig::GELU);
+    } else if (config.epilogue() == GemmBackendConfig::BIAS) {
+      config.set_epilogue(has_aux ? GemmBackendConfig::BIAS_GELU_AUX
+                                  : GemmBackendConfig::BIAS_GELU);
+    } else {
+      return absl::OkStatus();
+    }
+
+    std::unique_ptr<HloInstruction> output = gemm->CloneWithNewShape(
+        has_aux ? ShapeUtil::MakeTupleShape({gemm->shape(), gemm->shape()})
+                : gemm->shape());
+    TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
+    TF_RETURN_IF_ERROR(SetName(multiply->GetModule(), output.get()));
+
+    if (has_aux) {
+      HloInstruction *tuple_output =
+          gemm->parent()->AddInstruction(std::move(output));
+       TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(multiply, HloInstruction::CreateGetTupleElement(tuple_output, 0)));
+    
+
+       // Insert DGELU in backward matmul
+    std::vector<HloInstruction *> operands(bwd_gemm->operands().begin(),
+                                           bwd_gemm->operands().end());
+    operands.insert(operands.end(), gemm->parent()->AddInstruction(
+                                        HloInstruction::CreateGetTupleElement(
+                                            tuple_output, 1)));
+    HloInstruction *new_bwd_custom_call = bwd_gemm->parent()->AddInstruction(
+        bwd_gemm->CloneWithNewOperands(bwd_gemm->shape(), operands));
+   TF_ASSIGN_OR_RETURN(auto bwd_gpu_backend_config,
+                        bwd_gemm->backend_config<GpuBackendConfig>());
+    GemmBackendConfig &bwd_config =
+        *bwd_gpu_backend_config.mutable_gemm_backend_config();
+    bwd_config.set_epilogue(GemmBackendConfig::D_GELU);
+    TF_RETURN_IF_ERROR(
+        new_bwd_custom_call->set_backend_config(bwd_gpu_backend_config));
+    return ReplaceInstruction(final_add, new_bwd_custom_call);
+    }
+    return absl::OkStatus();
   }
 
   absl::Status FuseGeluActivation(HloInstruction *multiply,

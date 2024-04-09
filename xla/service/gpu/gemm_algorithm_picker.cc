@@ -90,7 +90,11 @@ absl::StatusOr<BlasLt::Epilogue> AsBlasLtEpilogue(
     case GemmBackendConfig::D_RELU:
       return BlasLt::Epilogue::kDReLU;
     case GemmBackendConfig::D_RELU_BGRAD:
-      return BlasLt::Epilogue::kDReLUBGrad;      
+      return BlasLt::Epilogue::kDReLUBGrad;
+    case GemmBackendConfig::D_GELU:
+      return BlasLt::Epilogue::kDGELU;
+    case GemmBackendConfig::D_GELU_BGRAD:
+      return BlasLt::Epilogue::kDGELUBGrad;      
     default:
       return Internal("Unsupported Epilogue.");
   }
@@ -502,3 +506,4 @@ absl::StatusOr<bool> GemmAlgorithmPicker::Run(
 
 }  // namespace gpu
 }  // namespace xla
+
