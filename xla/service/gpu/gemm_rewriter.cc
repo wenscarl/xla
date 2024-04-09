@@ -596,6 +596,13 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       }
     } else {
       // Rewrite non-FP8 GEMMs into a cublas or cublasLT Custom Call.
+      if (lhs->shape().element_type() == F8E5M2 ||
+          lhs->shape().element_type() == F8E4M3FN ||
+          rhs->shape().element_type() == F8E5M2 ||
+          rhs->shape().element_type() == F8E4M3FN) {
+        return absl::OkStatus();
+      }
+
       TF_ASSIGN_OR_RETURN(
           absl::string_view gemm_custom_call_target,
           GetNonFp8GemmCustomCallTarget(*instr, gemm_backend_config));
@@ -1103,64 +1110,46 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
         gemm_backend_config.mutable_dot_dimension_numbers();
     int batch_dim_offset = batch_dims.size();
 
-    // cuBLASLt FP8 GEMM kernels currently require the first operand, i.e. A, to
-    // be row-major. If A is column-major, swap the contracting and
-    // non-contracting dimension and transpose the matrix to effectively make it
-    // column-major.
-    // TODO(philipphack): Remove once cuBLASLt supports A being column-major
-    if (a_is_col_major) {
-      CHECK(a_contracting_dims[0] == batch_dim_offset ||
-            a_contracting_dims[0] == batch_dim_offset + 1);
-      if (a_contracting_dims[0] == batch_dim_offset) {
-        dim_nums->set_lhs_contracting_dimensions(0, batch_dim_offset + 1);
-      } else {
-        dim_nums->set_lhs_contracting_dimensions(0, batch_dim_offset);
-      }
-      a = TransposeMatrix(a, a_contracting_dims[0], batch_dims);
-    }
-
-    // Similarly, cuBLASLt requires the second operand to be column-major, so
-    // make it column-major if it is currently row-major.
-    if (!b_is_col_major) {
-      CHECK(b_contracting_dims[0] == batch_dim_offset ||
-            b_contracting_dims[0] == batch_dim_offset + 1);
-      if (b_contracting_dims[0] == batch_dim_offset) {
-        dim_nums->set_rhs_contracting_dimensions(0, batch_dim_offset + 1);
-      } else {
-        dim_nums->set_rhs_contracting_dimensions(0, batch_dim_offset);
-      }
-      b = TransposeMatrix(b, b_contracting_dims[0], batch_dims);
-    }
-
     a = PadOperandToMultipleOf16(batch_dims, a);
     b = PadOperandToMultipleOf16(batch_dims, b);
     Shape new_output_shape = PadShapeToMultipleOf16(instr->shape(), batch_dims);
 
-    std::vector<HloInstruction *> operands_list = {
-        a, b, scales_f32[0], scales_f32[1], one, one};
+    HloInstruction *new_dot = instr->AddInstruction(instr->CloneWithNewOperands(
+        ShapeUtil::MakeShapeWithDenseLayout(
+            instr->shape().element_type(), new_output_shape.dimensions(),
+            instr->shape().layout().minor_to_major()),
+        {a, b}));
+    VLOG(1) << new_dot->ToString();
+    TF_RETURN_IF_ERROR(SetName(instr->GetModule(), new_dot));
 
-    HloInstruction *new_custom_call =
-        instr->AddInstruction(HloInstruction::CreateCustomCall(
-            ShapeUtil::MakeShapeWithDenseLayout(
-                instr->shape().element_type(), new_output_shape.dimensions(),
-                instr->shape().layout().minor_to_major()),
-            operands_list, kCublasLtMatmulF8CallTarget));
-    TF_RETURN_IF_ERROR(new_custom_call->set_backend_config(gpu_backend_config));
-    TF_RETURN_IF_ERROR(SetName(instr->GetModule(), new_custom_call));
+    HloInstruction *bcast_a_scale = instr->AddInstruction(
+        HloInstruction::CreateBroadcast(new_dot->shape(), scales_f32[0], {}));
 
+    HloInstruction *bcast_b_scale = instr->AddInstruction(
+        HloInstruction::CreateBroadcast(new_dot->shape(), scales_f32[1], {}));
+
+    HloInstruction *new_dot_mult_a =
+        instr->AddInstruction(HloInstruction::CreateBinary(
+            new_dot->shape(), HloOpcode::kMultiply, new_dot, bcast_a_scale));
+
+    HloInstruction *new_dot_mult_b =
+        instr->AddInstruction(HloInstruction::CreateBinary(
+            new_dot_mult_a->shape(), HloOpcode::kMultiply, new_dot_mult_a,
+            bcast_b_scale));
     // Slice the result of the GEMM if the operands were padded.
     HloInstruction *slice = nullptr;
     if (new_output_shape.dimensions() != instr->shape().dimensions()) {
       std::vector<int64_t> start_indices(instr->shape().rank(), 0);
       std::vector<int64_t> strides(instr->shape().rank(), 1);
       slice = instr->AddInstruction(HloInstruction::CreateSlice(
-          instr->shape(), new_custom_call, start_indices,
+          instr->shape(), new_dot_mult_b, start_indices,
           instr->shape().dimensions(), strides));
     }
 
     TF_RETURN_IF_ERROR(
-        ReplaceInstruction(instr, slice ? slice : new_custom_call));
-    VLOG(1) << instr->ToString() << " rewritten into FP8 Custom Call.";
+        ReplaceInstruction(instr, slice ? slice : new_dot_mult_b));
+    VLOG(1) << instr->ToString()
+            << " rewritten into FP8 direct quantization patter.";
     return true;
   }
 
