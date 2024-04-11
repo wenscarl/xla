@@ -613,6 +613,38 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
   absl::Status HandleMultiply(HloInstruction *instr) override {
     HloInstruction *alpha, *existing_gemm;
+    HloInstruction *a_scale, *b_scale;
+    auto is_f32_scalar = [](const HloInstruction *instr) -> bool {
+      return ShapeUtil::IsEffectiveScalar(instr->shape()) && 
+      instr->shape().element_type() == S32;
+    };
+    if (Match(instr,
+      m::MultiplyAnyOrder( m::Broadcast(m::Op(&b_scale)).WithOneUser(),
+              m::MultiplyAnyOrder(
+                  CublasLtMatmulMaybeF8(&existing_gemm).WithOneUser(),
+                  m::Broadcast(m::Op(&a_scale)).WithOneUser())))) {
+                    VLOG(1) << "sssssssssssssss\n";
+      TF_ASSIGN_OR_RETURN(auto gpu_config,
+                          existing_gemm->backend_config<GpuBackendConfig>());
+      auto gemm_ops = existing_gemm->operands();
+      GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
+      int scales_start_idx = 2;
+      if (config.epilogue() == GemmBackendConfig::BIAS ||
+          config.epilogue() == GemmBackendConfig::BIAS_RELU || 
+          config.epilogue() == GemmBackendConfig::BIAS_GELU ||
+          config.epilogue() == GemmBackendConfig::BIAS_GELU_AUX) {
+          scales_start_idx = 3;
+      }
+      gemm_ops[scales_start_idx] = a_scale;
+      gemm_ops[scales_start_idx+1] = b_scale;
+
+      std::unique_ptr<HloInstruction> scaled_gemm = existing_gemm->CloneWithNewOperands(
+        existing_gemm->shape(), gemm_ops);
+      TF_RETURN_IF_ERROR(scaled_gemm->set_backend_config(gpu_config));
+      TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(instr, std::move(scaled_gemm)));
+      return absl::OkStatus();
+    }
+
     if (Match(instr,
               m::MultiplyAnyOrder(
                   GemmOrCublasLtMatmulMaybeF8(&existing_gemm).WithOneUser(),
