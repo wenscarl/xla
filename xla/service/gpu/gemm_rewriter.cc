@@ -912,6 +912,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
   // streamline and combine the ReLU gradient computation with grad_matmul2 as
   // an epilogue.
   absl::Status HandleSelect(HloInstruction *instr) override {
+    // fwd_gemm refers to matmul1 and bwd_gemm refers to grad_matmul2 above.
     HloInstruction *fwd_gemm = nullptr;
     HloInstruction *bwd_gemm = nullptr;
     HloInstruction *maximum = nullptr;
@@ -919,7 +920,8 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
     if (!Match(instr,
                m::Select(m::Compare(&compare, CublasLtMatmulMaybeF8(&fwd_gemm),
-                                    m::Broadcast(m::ConstantScalar(0))),
+                                    m::Broadcast(m::ConstantScalar(0)))
+                             .WithComparisonDirection(ComparisonDirection::kGt),
                          CublasLtMatmulMaybeF8(&bwd_gemm).WithOneUser(),
                          m::Broadcast(m::ConstantScalar(0))))) {
       return absl::OkStatus();
@@ -932,6 +934,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
     for (auto user : fwd_gemm->users()) {
       if (Match(user,
+                // m::MaximumAnyOrder(CublasLtMatmulMaybeF8(nullptr),
                 m::MaximumAnyOrder(m::CustomCall({kCublasLtMatmulCallTarget,
                                                   kCublasLtMatmulF8CallTarget}),
                                    m::Broadcast(m::ConstantScalar(0))))) {
@@ -943,6 +946,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     if (maximum == nullptr ||
         !SupportsEpilogueFusion(fwd_gemm->shape().element_type()) ||
         !(fwd_gemm_num_rows >= 128 && fwd_gemm_num_rows % 128 == 0)) {
+        // (fwd_gemm_num_rows % 128 != 0)) {
       // cublasLt requires that CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD Must be
       // divisible by 128 and be no less than the number of rows in the output
       // matrix.
@@ -969,24 +973,23 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     }
 
     Shape mask_shape = ShapeUtil::MakeShape(
-        PrimitiveType::U8, {ShapeUtil::ElementsIn(fwd_gemm->shape()) / 8});
+        PrimitiveType::U8, {ShapeUtil::ElementsIn(fwd_gemm->shape()) / CHAR_BIT});
     std::unique_ptr<HloInstruction> output = fwd_gemm->CloneWithNewShape(
         ShapeUtil::MakeTupleShape({fwd_gemm->shape(), mask_shape}));
     TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
     TF_RETURN_IF_ERROR(SetName(output->GetModule(), output.get()));
-    HloInstruction *tuple_output =
-        fwd_gemm->parent()->AddInstruction(std::move(output));
+    HloInstruction *tuple_output = fwd_gemm->AddInstruction(std::move(output));
     TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
         maximum, HloInstruction::CreateGetTupleElement(tuple_output, 0)));
 
     // Insert DRELU in backward matmul
     std::vector<HloInstruction *> operands(bwd_gemm->operands().begin(),
                                            bwd_gemm->operands().end());
-    operands.insert(operands.end(), fwd_gemm->parent()->AddInstruction(
+    operands.insert(operands.end(), fwd_gemm->AddInstruction(
                                         HloInstruction::CreateGetTupleElement(
                                             tuple_output, 1)));
 
-    HloInstruction *new_bwd_custom_call = bwd_gemm->parent()->AddInstruction(
+    HloInstruction *new_bwd_custom_call = bwd_gemm->AddInstruction(
         bwd_gemm->CloneWithNewOperands(bwd_gemm->shape(), operands));
 
     TF_ASSIGN_OR_RETURN(auto bwd_gpu_backend_config,
@@ -1000,15 +1003,23 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     return ReplaceInstruction(instr, new_bwd_custom_call);
   }
 
+  // This matches the backward pass of vector bias addition.
   absl::Status HandleReduce(HloInstruction *instr) override {
     HloInstruction *gemm = nullptr;
     if (Match(instr,
-              m::Reduce(m::CustomCall(&gemm, {kCublasLtMatmulCallTarget,
-                                              kCublasLtMatmulF8CallTarget}),
-                        m::ConstantScalar(0)))) {
+              m::Reduce(CublasLtMatmulMaybeF8(&gemm), m::ConstantScalar(0))
+                  .WithPredicate([](const HloInstruction *reduce) {
+                    HloComputation *reducer = reduce->to_apply();
+                    return (reducer->root_instruction()->opcode() ==
+                                HloOpcode::kMaximum &&
+                            reduce->dimensions().size() == 1 &&
+                            reduce->dimensions()[0] !=
+                                reduce->shape().rank() - 1);
+                  }))) {
       TF_ASSIGN_OR_RETURN(auto gpu_config,
                           gemm->backend_config<GpuBackendConfig>());
       GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
+      // Only enabled when there is a ReLU.
       if (config.epilogue() != GemmBackendConfig::D_RELU) {
         return absl::OkStatus();
       }
@@ -1020,7 +1031,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       TF_RETURN_IF_ERROR(SetName(instr->GetModule(), output.get()));
 
       HloInstruction *tuple_output =
-          gemm->parent()->AddInstruction(std::move(output));
+          gemm->AddInstruction(std::move(output));
       TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
           gemm, HloInstruction::CreateGetTupleElement(tuple_output, 0)));
       output = HloInstruction::CreateGetTupleElement(tuple_output, 1);
@@ -1436,7 +1447,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     return absl::OkStatus();
   }
 
-  // Adds a scalar DAmax return value to an FP8 GEMM.
+  // // Adds a scalar DAmax return value to an FP8 GEMM.
   absl::Status F8AddDAmax(HloInstruction *instr, HloInstruction *existing_gemm,
                           HloInstruction *reduce_damax,
                           HloInstruction *get_tuple_element) {
