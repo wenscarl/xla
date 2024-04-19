@@ -934,9 +934,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
 
     for (auto user : fwd_gemm->users()) {
       if (Match(user,
-                // m::MaximumAnyOrder(CublasLtMatmulMaybeF8(nullptr),
-                m::MaximumAnyOrder(m::CustomCall({kCublasLtMatmulCallTarget,
-                                                  kCublasLtMatmulF8CallTarget}),
+                m::MaximumAnyOrder(CublasLtMatmulMaybeF8(nullptr),
                                    m::Broadcast(m::ConstantScalar(0))))) {
         maximum = user;
         break;
@@ -945,8 +943,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     int64_t fwd_gemm_num_rows = fwd_gemm->shape().dimensions(0);
     if (maximum == nullptr ||
         !SupportsEpilogueFusion(fwd_gemm->shape().element_type()) ||
-        !(fwd_gemm_num_rows >= 128 && fwd_gemm_num_rows % 128 == 0)) {
-        // (fwd_gemm_num_rows % 128 != 0)) {
+        (fwd_gemm_num_rows % 128 != 0)) {
       // cublasLt requires that CUBLASLT_MATMUL_DESC_EPILOGUE_AUX_LD Must be
       // divisible by 128 and be no less than the number of rows in the output
       // matrix.
@@ -978,7 +975,9 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
         ShapeUtil::MakeTupleShape({fwd_gemm->shape(), mask_shape}));
     TF_RETURN_IF_ERROR(output->set_backend_config(gpu_config));
     TF_RETURN_IF_ERROR(SetName(output->GetModule(), output.get()));
-    HloInstruction *tuple_output = fwd_gemm->AddInstruction(std::move(output));
+    HloInstruction *tuple_output =
+        fwd_gemm->parent()->AddInstruction(std::move(output));
+    // HloInstruction *tuple_output = fwd_gemm->AddInstruction(std::move(output)); // has to be parent?
     TF_RETURN_IF_ERROR(ReplaceWithNewInstruction(
         maximum, HloInstruction::CreateGetTupleElement(tuple_output, 0)));
 
@@ -1003,19 +1002,21 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     return ReplaceInstruction(instr, new_bwd_custom_call);
   }
 
-  // This matches the backward pass of vector bias addition.
+  // This matches the backward pass of vector bias addition.   
+  // .WithPredicate([](const HloInstruction *reduce) {
+  //                   HloComputation *reducer = reduce->to_apply();
+  //                   return (reducer->root_instruction()->opcode() ==
+  //                               HloOpcode::kAdd &&
+  //                           reduce->dimensions().size() == 1 &&
+  //                           reduce->dimensions()[0] == 0);
+  //                 })
   absl::Status HandleReduce(HloInstruction *instr) override {
+    VLOG(1) << "mmmmmmmmmmmm handlereduce:";
     HloInstruction *gemm = nullptr;
     if (Match(instr,
               m::Reduce(CublasLtMatmulMaybeF8(&gemm), m::ConstantScalar(0))
-                  .WithPredicate([](const HloInstruction *reduce) {
-                    HloComputation *reducer = reduce->to_apply();
-                    return (reducer->root_instruction()->opcode() ==
-                                HloOpcode::kMaximum &&
-                            reduce->dimensions().size() == 1 &&
-                            reduce->dimensions()[0] !=
-                                reduce->shape().rank() - 1);
-                  }))) {
+               )) {
+                VLOG(1) << "mmmmmmmmmmmm handlereduce: in match";
       TF_ASSIGN_OR_RETURN(auto gpu_config,
                           gemm->backend_config<GpuBackendConfig>());
       GemmBackendConfig &config = *gpu_config.mutable_gemm_backend_config();
@@ -1023,6 +1024,7 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
       if (config.epilogue() != GemmBackendConfig::D_RELU) {
         return absl::OkStatus();
       }
+               VLOG(1) << "mmmmmmmmmmmm handlereduce: in match DRELU";
       config.set_epilogue(GemmBackendConfig::D_RELU_BGRAD);
       std::unique_ptr<HloInstruction> output = gemm->CloneWithNewShape(
           ShapeUtil::MakeTupleShape({gemm->shape(), instr->shape()}));
@@ -1447,10 +1449,11 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
     return absl::OkStatus();
   }
 
-  // // Adds a scalar DAmax return value to an FP8 GEMM.
+  // Adds a scalar DAmax return value to an FP8 GEMM.
   absl::Status F8AddDAmax(HloInstruction *instr, HloInstruction *existing_gemm,
                           HloInstruction *reduce_damax,
                           HloInstruction *get_tuple_element) {
+    // return absl::OkStatus();
     // Change the output shape of the Custom Call to tuple(D, DAmax).
     Shape damax_shape = ShapeUtil::MakeScalarShape(F32);
 
@@ -1476,17 +1479,8 @@ class GemmRewriterVisitor : public DfsHloRewriteVisitor {
         HloInstruction::CreateConvert(reduce_damax->shape(), damax));
 
     if (get_tuple_element) {
-      HloInstruction *bitmask =
-          instr->AddInstruction(HloInstruction::CreateGetTupleElement(
-              existing_gemm->shape().tuple_shapes(1), gemm_and_damax, 1));
-      HloInstruction *get_bitmask;
-      for (auto user : existing_gemm->users()) {
-        if (user != get_tuple_element) {
-          get_bitmask = user;
-          break;
-        }
-      }
-      TF_RETURN_IF_ERROR(ReplaceInstruction(get_bitmask, bitmask));
+      TF_RETURN_IF_ERROR(instr->parent()->ReplaceInstructionWithDifferentShape(
+          existing_gemm, gemm_and_damax));
     }
     TF_RETURN_IF_ERROR(ReplaceInstruction(reduce_damax, damax_converted));
     TF_RETURN_IF_ERROR(ReplaceInstruction(instr, d));
