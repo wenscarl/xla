@@ -1177,6 +1177,93 @@ absl::Status IrEmitterUnnested::EmitFusedMHABackwardThunk(
   return absl::OkStatus();
 }
 
+absl::Status IrEmitterUnnested::EmitFusedMHAThunkF8(
+    const HloCustomCallInstruction* instr) {
+  const HloInstruction* lhs_bmm1 = instr->operand(0);
+  const HloInstruction* rhs_bmm1 = instr->operand(1);
+  const HloInstruction* rhs_bmm2 = instr->operand(2);
+  const HloInstruction* descale_q = instr->operand(3);
+  const HloInstruction* descale_k = instr->operand(4);
+  const HloInstruction* descale_v = instr->operand(5);
+  const HloInstruction* descale_s = instr->operand(6);
+  const HloInstruction* scale_s = instr->operand(7);
+  const HloInstruction* scale_o = instr->operand(8);
+
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice lhs_bmm1_slice,
+                      GetAllocationSliceForHlo(lhs_bmm1));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice rhs_bmm1_slice,
+                      GetAllocationSliceForHlo(rhs_bmm1));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice rhs_bmm2_slice,
+                      GetAllocationSliceForHlo(rhs_bmm2));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice descale_q_slice,
+                      GetAllocationSliceForHlo(descale_q));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice descale_k_slice,
+                      GetAllocationSliceForHlo(descale_k));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice descale_v_slice,
+                      GetAllocationSliceForHlo(descale_v));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice descale_s_slice,
+                      GetAllocationSliceForHlo(descale_s));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice scale_s_slice,
+                      GetAllocationSliceForHlo(scale_s));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice scale_o_slice,
+                      GetAllocationSliceForHlo(scale_o));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice output_slice,
+                      GetAllocationSliceForHlo(instr, {0}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice amax_s_slice,
+                      GetAllocationSliceForHlo(instr, {1}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice amax_o_slice,
+                      GetAllocationSliceForHlo(instr, {2}));
+  TF_ASSIGN_OR_RETURN(BufferAllocation::Slice scratch_slice,
+                      GetAllocationSliceForHlo(
+                          instr, {instr->shape().tuple_shapes_size() - 1}));
+  BufferAllocation::Slice activation_slice;
+  bool has_activation = xla::ShapeUtil::TupleElementCount(instr->shape()) == 5;
+  if (has_activation) {
+    TF_ASSIGN_OR_RETURN(activation_slice, GetAllocationSliceForHlo(instr, {3}));
+  }
+
+  TF_ASSIGN_OR_RETURN(const xla::gpu::CudnnfMHAKind kind,
+                      xla::gpu::GetCudnnfMHAKind(instr));
+  assert(kind == CudnnfMHAKind::kScaleSoftmaxf8);
+  // BufferAllocation::Slice mask_slice;
+  // std::optional<Shape> mask_shape;
+
+  TF_ASSIGN_OR_RETURN(const auto gpu_config,
+                      instr->backend_config<xla::gpu::GpuBackendConfig>());
+  const xla::gpu::CudnnfMHABackendConfig& config =
+      gpu_config.cudnn_fmha_backend_config();
+  Shape intermediate_tensor_shape(config.intermediate_tensor_shape());
+  absl::InlinedVector<Shape, 4> output_shapes = {
+      ShapeUtil::GetSubshape(instr->shape(), {0}),
+      ShapeUtil::GetSubshape(instr->shape(), {1}),
+      ShapeUtil::GetSubshape(instr->shape(), {2})};
+  if (has_activation) {
+    output_shapes.push_back(ShapeUtil::GetSubshape(instr->shape(), {3}));
+  }
+  TF_ASSIGN_OR_RETURN(const auto mask_type,
+                      AsCudnnFmhaMaskKind(config.mask_type()));
+  GpufMHAF8Descriptor descriptor = {kind,
+                                    config,
+                                    mask_type,
+                                    lhs_bmm1->shape(),
+                                    rhs_bmm1->shape(),
+                                    rhs_bmm2->shape(),
+                                    intermediate_tensor_shape,
+                                    output_shapes,
+                                    config.bmm1_dot_dimension_numbers(),
+                                    config.bmm2_dot_dimension_numbers()};
+
+  TF_ASSIGN_OR_RETURN(GpufMHAConfig fmha_config,
+                      GpufMHAConfig::For(descriptor));
+  AddThunkToThunkSequence(std::make_unique<FusedMHAThunkF8>(
+      Thunk::ThunkInfo::WithProfileAnnotation(instr), std::move(fmha_config),
+      lhs_bmm1_slice, rhs_bmm1_slice, rhs_bmm2_slice, descale_q_slice,
+      descale_k_slice, descale_v_slice, descale_s_slice, scale_s_slice,
+      scale_o_slice, output_slice, amax_s_slice, amax_s_slice, scratch_slice,
+      activation_slice));
+  return absl::OkStatus();
+}
+
 #endif  // GOOGLE_CUDA
 
 absl::StatusOr<BufferAllocation::Slice>
@@ -2914,6 +3001,9 @@ absl::Status IrEmitterUnnested::EmitHloInstruction(
       }
       if (IsBwdCustomCallTofMHA(*instr)) {
         return EmitFusedMHABackwardThunk(custom_call);
+      }
+      if (IsFwdCustomCallTofMHAF8(*instr)) {
+        return EmitFusedMHAThunkF8(custom_call);
       }
 #endif  // GOOGLE_CUDA
       if (IsCustomCallToTopK(*instr)) {

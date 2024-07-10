@@ -335,6 +335,25 @@ class CudnnSupport : public dnn::DnnSupport {
       std::optional<dnn::TensorDescriptor> dscale_descriptor,
       std::optional<dnn::TensorDescriptor> dbias_descriptor) override;
 
+  absl::StatusOr<std::unique_ptr<const dnn::FusedMHAF8Runner>>
+  FusedMHAF8RunnerFromDesc(
+      Stream* stream, const const dnn::AlgorithmDesc& algorithm_desc,
+      const dnn::MatmulTensorDescriptor& bmm1_lhs_descriptor,
+      const dnn::MatmulTensorDescriptor& bmm1_rhs_descriptor,
+      const dnn::MatmulTensorDescriptor& bmm2_rhs_descriptor,
+      const dnn::MatmulTensorDescriptor& intermediate_bmm2_lhs_descriptor,
+      //   const dnn::TensorDescriptor& descale_q_descriptor,
+      //   const dnn::TensorDescriptor& descale_k_descriptor,
+      //   const dnn::TensorDescriptor& descale_v_descriptor,
+      //   const dnn::TensorDescriptor& descale_s_descriptor,
+      //   const dnn::TensorDescriptor& scale_s_descriptor,
+      //   const dnn::TensorDescriptor& scale_o_descriptor,
+      //   const dnn::TensorDescriptor& amax_s_descriptor,
+      //   const dnn::TensorDescriptor& amax_o_descriptor,
+      const dnn::TensorDescriptor& output_descriptor,
+      std::optional<dnn::TensorDescriptor> activation_descriptor, double scale,
+      dnn::FMHAMaskKind mask_type) override;
+
   absl::StatusOr<std::unique_ptr<const dnn::FusedMHARunner>>
   FusedMHARunnerFromDesc(
       Stream* stream, const dnn::AlgorithmDesc& algorithm_desc,
