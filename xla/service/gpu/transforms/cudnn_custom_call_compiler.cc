@@ -67,16 +67,37 @@ using se::dnn::DataType;
 using se::dnn::MatmulTensorDescriptor;
 using se::dnn::TensorDescriptor;
 
+absl::StatusOr<TensorDescriptor> TensorDescriptorFor(const Shape &shape) {
+  TF_ASSIGN_OR_RETURN(const DataType type,
+                      GetDNNDataTypeFromPrimitiveType(shape.element_type()));
+  return TensorDescriptor::For(type, shape.dimensions(),
+                               shape.layout().minor_to_major());
+}
+
+enum Side { LHS, RHS };
+
+absl::StatusOr<MatmulTensorDescriptor> MatmulTensorDescriptorFor(
+    const Shape &shape, const DotDimensionNumbers &dnums, const Side side) {
+  TF_ASSIGN_OR_RETURN(const DataType type,
+                      GetDNNDataTypeFromPrimitiveType(shape.element_type()));
+  return MatmulTensorDescriptor::For(
+      type, shape.dimensions(), shape.layout().minor_to_major(),
+      (side == LHS) ? dnums.lhs_batch_dimensions()
+                    : dnums.rhs_batch_dimensions(),
+      (side == LHS) ? dnums.lhs_contracting_dimensions()
+                    : dnums.rhs_contracting_dimensions());
+}
+
 absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
     se::dnn::DnnSupport &dnn_support, HloCustomCallInstruction *custom_call) {
   if (IsFwdCustomCallTofMHA(*custom_call)) {
+    std::cout  << "bbbbbbbbbbbbbbbbbb\n";
     TF_ASSIGN_OR_RETURN(const xla::gpu::CudnnfMHAKind kind,
                         xla::gpu::GetCudnnfMHAKind(custom_call));
-    std::optional<Shape> mask_shape, bias_shape;
+    std::optional<Shape> bias_shape;
     {
       bool has_bias = kind == CudnnfMHAKind::kScaleBiasSoftmax ||
                       kind == CudnnfMHAKind::kScaleBiasSoftmaxDropout;
-
       if (has_bias) {
         const HloInstruction *bias = custom_call->operand(3);
         bias_shape = bias->shape();
@@ -88,7 +109,6 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
         custom_call->backend_config<xla::gpu::GpuBackendConfig>());
     const xla::gpu::CudnnfMHABackendConfig &config =
         gpu_config.cudnn_fmha_backend_config();
-    Shape intermediate_tensor_shape(config.intermediate_tensor_shape());
     absl::InlinedVector<Shape, 2> output_shapes = {
         ShapeUtil::GetSubshape(custom_call->shape(), {0})};
 
@@ -99,72 +119,30 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
           ShapeUtil::GetSubshape(custom_call->shape(), {1}));
     }
 
-    const Shape &lhs_bmm1_shape = custom_call->operand(0)->shape();
-    const Shape &rhs_bmm1_shape = custom_call->operand(1)->shape();
-    const Shape &rhs_bmm2_shape = custom_call->operand(2)->shape();
-    const Shape &intermediate_lhs_bmm2_shape = intermediate_tensor_shape;
-    const Shape &output_shape = output_shapes[0];
-    const DotDimensionNumbers &bmm1_dnums = config.bmm1_dot_dimension_numbers();
-    const DotDimensionNumbers &bmm2_dnums = config.bmm2_dot_dimension_numbers();
-
     TF_ASSIGN_OR_RETURN(
-        DataType lhs_bmm1_type,
-        GetDNNDataTypeFromPrimitiveType(lhs_bmm1_shape.element_type()));
+        MatmulTensorDescriptor lhs_bmm1,
+        MatmulTensorDescriptorFor(custom_call->operand(0)->shape(),
+                                  config.bmm1_dot_dimension_numbers(), LHS));
     TF_ASSIGN_OR_RETURN(
-        DataType rhs_bmm1_type,
-        GetDNNDataTypeFromPrimitiveType(rhs_bmm1_shape.element_type()));
+        MatmulTensorDescriptor rhs_bmm1,
+        MatmulTensorDescriptorFor(custom_call->operand(1)->shape(),
+                                  config.bmm1_dot_dimension_numbers(), RHS));
     TF_ASSIGN_OR_RETURN(
-        DataType rhs_bmm2_type,
-        GetDNNDataTypeFromPrimitiveType(rhs_bmm2_shape.element_type()));
-    TF_ASSIGN_OR_RETURN(DataType lhs_bmm2_type,
-                        GetDNNDataTypeFromPrimitiveType(
-                            intermediate_lhs_bmm2_shape.element_type()));
-    TF_ASSIGN_OR_RETURN(DataType output_type, GetDNNDataTypeFromPrimitiveType(
-                                                  output_shape.element_type()));
-
-    MatmulTensorDescriptor lhs_bmm1 =
-        MatmulTensorDescriptor::For(lhs_bmm1_type, lhs_bmm1_shape.dimensions(),
-                                    lhs_bmm1_shape.layout().minor_to_major(),
-                                    bmm1_dnums.lhs_batch_dimensions(),
-                                    bmm1_dnums.lhs_contracting_dimensions());
-    MatmulTensorDescriptor rhs_bmm1 =
-        MatmulTensorDescriptor::For(rhs_bmm1_type, rhs_bmm1_shape.dimensions(),
-                                    rhs_bmm1_shape.layout().minor_to_major(),
-                                    bmm1_dnums.rhs_batch_dimensions(),
-                                    bmm1_dnums.rhs_contracting_dimensions());
-    MatmulTensorDescriptor rhs_bmm2 =
-        MatmulTensorDescriptor::For(rhs_bmm2_type, rhs_bmm2_shape.dimensions(),
-                                    rhs_bmm2_shape.layout().minor_to_major(),
-                                    bmm2_dnums.rhs_batch_dimensions(),
-                                    bmm2_dnums.rhs_contracting_dimensions());
-    MatmulTensorDescriptor intermediate_lhs_bmm2 = MatmulTensorDescriptor::For(
-        lhs_bmm2_type, intermediate_lhs_bmm2_shape.dimensions(),
-        intermediate_lhs_bmm2_shape.layout().minor_to_major(),
-        bmm2_dnums.lhs_batch_dimensions(),
-        bmm2_dnums.lhs_contracting_dimensions());
-    TensorDescriptor output =
-        TensorDescriptor::For(output_type, output_shape.dimensions(),
-                              output_shape.layout().minor_to_major());
+        MatmulTensorDescriptor rhs_bmm2,
+        MatmulTensorDescriptorFor(custom_call->operand(2)->shape(),
+                                  config.bmm2_dot_dimension_numbers(), RHS));
+    TF_ASSIGN_OR_RETURN(TensorDescriptor output,
+                        TensorDescriptorFor(output_shapes[0]));
 
     std::optional<se::dnn::TensorDescriptor> activation;
     if (output_shapes.size() > 1) {
       const Shape &activation_shape = output_shapes.back();
-      // Generally, activation should have same type as output, but set it
-      // explicityly just to be safe.
-      TF_ASSIGN_OR_RETURN(
-          DataType activation_type,
-          GetDNNDataTypeFromPrimitiveType(activation_shape.element_type()));
-      activation =
-          TensorDescriptor::For(activation_type, activation_shape.dimensions(),
-                                activation_shape.layout().minor_to_major());
+      TF_ASSIGN_OR_RETURN(activation, TensorDescriptorFor(activation_shape));
     }
 
     std::optional<se::dnn::TensorDescriptor> bias;
     if (bias_shape.has_value()) {
-      TF_ASSIGN_OR_RETURN(DataType bias_type, GetDNNDataTypeFromPrimitiveType(
-                                                  bias_shape->element_type()));
-      bias = TensorDescriptor::For(bias_type, bias_shape->dimensions(),
-                                   bias_shape->layout().minor_to_major());
+      TF_ASSIGN_OR_RETURN(bias, TensorDescriptorFor(*bias_shape));
     }
 
     const double dropout_rate = config.dropout_rate();
@@ -182,8 +160,9 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
             static_cast<float>(config.fmha_scale()), dropout_rate > 0.0,
             dropout_rate, dnn_mask_type));
     return std::move(graph);
-  } else if (IsFwdCustomCallTofMHAF8(*custom_call)) {
-    TF_ASSIGN_OR_RETURN(const xla::gpu::CudnnfMHAKind kind,
+    } else if (IsFwdCustomCallTofMHAF8(*custom_call)) {
+     std::cout  << "aaaaaaaaaaaaaaaaaaaa\n";
+     TF_ASSIGN_OR_RETURN(const xla::gpu::CudnnfMHAKind kind,
                         xla::gpu::GetCudnnfMHAKind(custom_call));
     TF_ASSIGN_OR_RETURN(
         const auto gpu_config,
@@ -241,19 +220,18 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
         *gpu_config.mutable_cudnn_fmha_backend_config();
 
     int input_index = 0;
-    Shape bmm1_grad_gemm1_rhs_shape =
+    const Shape &bmm1_grad_gemm1_rhs_shape =
         custom_call->operand(input_index++)->shape();
-    Shape bmm1_grad_gemm2_rhs_shape =
+    const Shape &bmm1_grad_gemm2_rhs_shape =
         custom_call->operand(input_index++)->shape();
-    Shape bmm2_grad_gemm2_rhs_shape =
+    const Shape &bmm2_grad_gemm2_rhs_shape =
         custom_call->operand(input_index++)->shape();
-    Shape bmm2_grad_gemm1_lhs_shape(config.intermediate_tensor_shape());
-    input_index++;
-    Shape d_output_shape = custom_call->operand(input_index++)->shape();
+    const Shape bmm2_grad_gemm1_lhs_shape(config.intermediate_tensor_shape());
+    ++input_index;
+    const Shape &d_output_shape = custom_call->operand(input_index++)->shape();
 
     TF_ASSIGN_OR_RETURN(const CudnnfMHAKind kind,
                         GetCudnnfMHAKind(custom_call));
-    std::optional<Shape> mask_shape;
 
     bool has_bias = (kind == CudnnfMHAKind::kBackwardScaleBiasSoftmax ||
                      kind == CudnnfMHAKind::kBackwardScaleBiasSoftmaxDropout);
@@ -262,8 +240,9 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
       bias_shape = custom_call->operand(input_index++)->shape();
     }
 
-    std::optional<Shape> fwd_output_shape =
-        custom_call->operand(input_index++)->shape();
+    // Unused fwd_output_shape
+    ++input_index;
+
     if (config.mask_type() == xla::gpu::CudnnfMHABackendConfig::PADDING ||
         config.mask_type() ==
             xla::gpu::CudnnfMHABackendConfig::PADDING_CAUSAL) {
@@ -273,17 +252,15 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
     TF_RET_CHECK(input_index == custom_call->operand_count());
 
     int output_index = 0;
-    Shape d_bmm1_lhs_shape =
+    const Shape &d_bmm1_lhs_shape =
         ShapeUtil::GetSubshape(custom_call->shape(), {output_index++});
-    Shape d_bmm1_rhs_shape =
+    const Shape &d_bmm1_rhs_shape =
         ShapeUtil::GetSubshape(custom_call->shape(), {output_index++});
-    Shape d_bmm2_rhs_shape =
+    const Shape &d_bmm2_rhs_shape =
         ShapeUtil::GetSubshape(custom_call->shape(), {output_index++});
-    std::optional<Shape> d_bias_shape;
     bool has_dbias = custom_call->shape().tuple_shapes().size() == 5;
     if (has_dbias) {
-      d_bias_shape =
-          ShapeUtil::GetSubshape(custom_call->shape(), {output_index++});
+      ++output_index;
     }
     // The last one is the workspace.
     TF_RET_CHECK(output_index ==
@@ -297,119 +274,45 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
     config.set_force_deterministic(force_deterministic);
     TF_RETURN_IF_ERROR(custom_call->set_backend_config(gpu_config));
 
-    TF_ASSIGN_OR_RETURN(DataType bmm1_grad_gemm1_rhs_type,
-                        GetDNNDataTypeFromPrimitiveType(
-                            bmm1_grad_gemm1_rhs_shape.element_type()));
-    TF_ASSIGN_OR_RETURN(DataType bmm1_grad_gemm2_rhs_type,
-                        GetDNNDataTypeFromPrimitiveType(
-                            bmm1_grad_gemm2_rhs_shape.element_type()));
-    TF_ASSIGN_OR_RETURN(DataType bmm2_grad_gemm1_lhs_type,
-                        GetDNNDataTypeFromPrimitiveType(
-                            bmm2_grad_gemm1_lhs_shape.element_type()));
-    TF_ASSIGN_OR_RETURN(DataType bmm2_grad_gemm2_rhs_type,
-                        GetDNNDataTypeFromPrimitiveType(
-                            bmm2_grad_gemm2_rhs_shape.element_type()));
     TF_ASSIGN_OR_RETURN(
-        DataType d_output_type,
-        GetDNNDataTypeFromPrimitiveType(d_output_shape.element_type()));
+        MatmulTensorDescriptor bmm1_grad_gemm1_rhs,
+        MatmulTensorDescriptorFor(
+            bmm1_grad_gemm1_rhs_shape,
+            config.bmm1_grad_gemm1_dot_dimension_numbers(), RHS));
     TF_ASSIGN_OR_RETURN(
-        DataType d_bmm1_lhs_type,
-        GetDNNDataTypeFromPrimitiveType(d_bmm1_lhs_shape.element_type()));
+        MatmulTensorDescriptor bmm1_grad_gemm2_rhs,
+        MatmulTensorDescriptorFor(
+            bmm1_grad_gemm2_rhs_shape,
+            config.bmm1_grad_gemm2_dot_dimension_numbers(), RHS));
     TF_ASSIGN_OR_RETURN(
-        DataType d_bmm1_rhs_type,
-        GetDNNDataTypeFromPrimitiveType(d_bmm1_rhs_shape.element_type()));
+        MatmulTensorDescriptor bmm2_grad_gemm1_lhs,
+        MatmulTensorDescriptorFor(
+            bmm2_grad_gemm1_lhs_shape,
+            config.bmm2_grad_gemm1_dot_dimension_numbers(), LHS));
     TF_ASSIGN_OR_RETURN(
-        DataType d_bmm2_rhs_type,
-        GetDNNDataTypeFromPrimitiveType(d_bmm2_rhs_shape.element_type()));
+        MatmulTensorDescriptor bmm2_grad_gemm2_rhs,
+        MatmulTensorDescriptorFor(
+            bmm2_grad_gemm2_rhs_shape,
+            config.bmm2_grad_gemm2_dot_dimension_numbers(), RHS));
+    TF_ASSIGN_OR_RETURN(
+        MatmulTensorDescriptor d_output,
+        MatmulTensorDescriptorFor(
+            d_output_shape, config.bmm2_grad_gemm1_dot_dimension_numbers(),
+            RHS));
 
-    const DotDimensionNumbers &bmm1_grad_gemm1_dnums =
-        config.bmm1_grad_gemm1_dot_dimension_numbers();
-    const DotDimensionNumbers &bmm1_grad_gemm2_dnums =
-        config.bmm1_grad_gemm2_dot_dimension_numbers();
-    const DotDimensionNumbers &bmm2_grad_gemm1_dnums =
-        config.bmm2_grad_gemm1_dot_dimension_numbers();
-    const DotDimensionNumbers &bmm2_grad_gemm2_dnums =
-        config.bmm2_grad_gemm2_dot_dimension_numbers();
-
-    MatmulTensorDescriptor bmm1_grad_gemm1_rhs = MatmulTensorDescriptor::For(
-        bmm1_grad_gemm1_rhs_type, bmm1_grad_gemm1_rhs_shape.dimensions(),
-        bmm1_grad_gemm1_rhs_shape.layout().minor_to_major(),
-        bmm1_grad_gemm1_dnums.rhs_batch_dimensions(),
-        bmm1_grad_gemm1_dnums.rhs_contracting_dimensions());
-
-    MatmulTensorDescriptor bmm1_grad_gemm2_rhs = MatmulTensorDescriptor::For(
-        bmm1_grad_gemm2_rhs_type, bmm1_grad_gemm2_rhs_shape.dimensions(),
-        bmm1_grad_gemm2_rhs_shape.layout().minor_to_major(),
-        bmm1_grad_gemm2_dnums.rhs_batch_dimensions(),
-        bmm1_grad_gemm2_dnums.rhs_contracting_dimensions());
-
-    MatmulTensorDescriptor bmm2_grad_gemm1_lhs = MatmulTensorDescriptor::For(
-        bmm2_grad_gemm1_lhs_type, bmm2_grad_gemm1_lhs_shape.dimensions(),
-        bmm2_grad_gemm1_lhs_shape.layout().minor_to_major(),
-        bmm2_grad_gemm1_dnums.lhs_batch_dimensions(),
-        bmm2_grad_gemm1_dnums.lhs_contracting_dimensions());
-
-    MatmulTensorDescriptor d_output = MatmulTensorDescriptor::For(
-        d_output_type, d_output_shape.dimensions(),
-        d_output_shape.layout().minor_to_major(),
-        bmm2_grad_gemm1_dnums.rhs_batch_dimensions(),
-        bmm2_grad_gemm1_dnums.rhs_contracting_dimensions());
-
-    MatmulTensorDescriptor bmm2_grad_gemm2_rhs = MatmulTensorDescriptor::For(
-        bmm2_grad_gemm2_rhs_type, bmm2_grad_gemm2_rhs_shape.dimensions(),
-        bmm2_grad_gemm2_rhs_shape.layout().minor_to_major(),
-        bmm2_grad_gemm2_dnums.rhs_batch_dimensions(),
-        bmm2_grad_gemm2_dnums
-            .rhs_contracting_dimensions());  // FMHA TODO: transpose here?
-
-    TensorDescriptor d_bmm1_lhs =
-        TensorDescriptor::For(d_bmm1_lhs_type, d_bmm1_lhs_shape.dimensions(),
-                              d_bmm1_lhs_shape.layout().minor_to_major());
-    TensorDescriptor d_bmm1_rhs =
-        TensorDescriptor::For(d_bmm1_rhs_type, d_bmm1_rhs_shape.dimensions(),
-                              d_bmm1_rhs_shape.layout().minor_to_major());
-    TensorDescriptor d_bmm2_rhs =
-        TensorDescriptor::For(d_bmm2_rhs_type, d_bmm2_rhs_shape.dimensions(),
-                              d_bmm2_rhs_shape.layout().minor_to_major());
-
-    std::optional<se::dnn::TensorDescriptor> d_bias;
-    if (d_bias_shape.has_value()) {
-      // Get DNN dtype from primtive types
-      TF_ASSIGN_OR_RETURN(
-          DataType d_bias_type,
-          GetDNNDataTypeFromPrimitiveType(d_bias_shape->element_type()));
-      d_bias = TensorDescriptor::For(d_bias_type, d_bias_shape->dimensions(),
-                                     d_bias_shape->layout().minor_to_major());
-    }
-
-    std::optional<se::dnn::TensorDescriptor> mask;
-    if (mask_shape.has_value()) {
-      TF_ASSIGN_OR_RETURN(DataType mask_type, GetDNNDataTypeFromPrimitiveType(
-                                                  mask_shape->element_type()));
-      mask = TensorDescriptor::For(mask_type, mask_shape->dimensions(),
-                                   mask_shape->layout().minor_to_major());
-    }
-
-    std::optional<se::dnn::TensorDescriptor> fwd_output;
-    if (fwd_output_shape.has_value()) {
-      TF_ASSIGN_OR_RETURN(
-          DataType fwd_output_type,
-          GetDNNDataTypeFromPrimitiveType(fwd_output_shape->element_type()));
-      fwd_output =
-          TensorDescriptor::For(fwd_output_type, fwd_output_shape->dimensions(),
-                                fwd_output_shape->layout().minor_to_major());
-    }
+    TF_ASSIGN_OR_RETURN(TensorDescriptor d_bmm1_lhs,
+                        TensorDescriptorFor(d_bmm1_lhs_shape));
+    TF_ASSIGN_OR_RETURN(TensorDescriptor d_bmm1_rhs,
+                        TensorDescriptorFor(d_bmm1_rhs_shape));
+    TF_ASSIGN_OR_RETURN(TensorDescriptor d_bmm2_rhs,
+                        TensorDescriptorFor(d_bmm2_rhs_shape));
 
     std::optional<se::dnn::TensorDescriptor> bias;
     if (bias_shape.has_value()) {
-      TF_ASSIGN_OR_RETURN(DataType bias_type, GetDNNDataTypeFromPrimitiveType(
-                                                  bias_shape->element_type()));
-      bias = TensorDescriptor::For(bias_type, bias_shape->dimensions(),
-                                   bias_shape->layout().minor_to_major());
+      TF_ASSIGN_OR_RETURN(bias, TensorDescriptorFor(*bias_shape));
     }
 
-    const CudnnfMHABackendConfig &backend_config = config;
-    const double dropout_rate = backend_config.dropout_rate();
+    const double dropout_rate = config.dropout_rate();
 
     TF_ASSIGN_OR_RETURN(CudnnfMHAMaskKind cudnn_mask_type,
                         AsCudnnFmhaMaskKind(config.mask_type()));
@@ -422,9 +325,9 @@ absl::StatusOr<se::gpu::CudnnGraph> HloCustomCallToCuDnnGraph(
         se::gpu::GetCudnnFlashAttentionBackwardOperationGraph(
             dnn_support, bmm1_grad_gemm1_rhs, bmm1_grad_gemm2_rhs,
             bmm2_grad_gemm1_lhs, bmm2_grad_gemm2_rhs, d_output, d_bmm1_lhs,
-            d_bmm1_rhs, d_bmm2_rhs, bias, dropout_rate, backend_config.seed(),
-            backend_config.fmha_scale(), dropout_rate > 0.0,
-            bias != std::nullopt, dnn_mask_type, force_deterministic));
+            d_bmm1_rhs, d_bmm2_rhs, bias, dropout_rate, config.seed(),
+            config.fmha_scale(), dropout_rate > 0.0, bias != std::nullopt,
+            dnn_mask_type, force_deterministic));
     return std::move(graph);
   }
 }
@@ -446,7 +349,7 @@ class CuDnnCustomCallVisitor : public DfsHloRewriteVisitor {
   }
 
   absl::Status HandleCustomCall(HloInstruction *hlo) override {
-    if (!IsCustomCallTofMHA(*hlo) && !IsCustomCallTofMHAF8(*hlo)) {      
+    if (!IsCustomCallTofMHA(*hlo) && !IsCustomCallTofMHAF8(*hlo)) {
       return absl::OkStatus();
     }
 

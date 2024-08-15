@@ -5199,7 +5199,7 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
           .set_dim(v_descriptor.GetCudnnCompatibleDimensions(false))
           .set_stride(v_descriptor.GetCudnnCompatibleStrides(false))
           .set_uid(next_uid()));
-
+ std::cout << "pppppppppppppppppppppppppp\n";
   auto descale_q =
       graph.tensor(Tensor_attributes()
                        .set_name("Descale_Q")
@@ -5212,7 +5212,7 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
   auto descale_s = graph.tensor_like(descale_q, "Descale_S");
   auto scale_s = graph.tensor_like(descale_q, "Scale_S");
   auto scale_o = graph.tensor_like(descale_q, "Scale_O");
-
+ std::cout << "ggggggggggggggggggggggggggg\n";
   descale_k->set_uid(next_uid());
   descale_v->set_uid(next_uid());
   descale_s->set_uid(next_uid());
@@ -5240,13 +5240,15 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
       .set_uid(next_uid());
   amax_s->set_output(true)
       .set_dim({1, 1, 1, 1})
+      .set_stride({1, 1, 1, 1})
       .set_data_type(cudnn_frontend::DataType_t::FLOAT)
       .set_uid(next_uid());
   amax_o->set_output(true)
       .set_dim({1, 1, 1, 1})
+      .set_stride({1, 1, 1, 1})
       .set_data_type(cudnn_frontend::DataType_t::FLOAT)
       .set_uid(next_uid());
-
+ std::cout << "dddddddddddddddddddddddddddd\n";
   if (stats_descriptor.has_value()) {
     cudnn_frontend::DataType_t statsType =
         ToCudnnFrontendDataType(stats_descriptor->type());
@@ -5261,12 +5263,15 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
         .set_stride(stat_strides)
         .set_uid(next_uid());
   }
+  std::cout << "mmmmmmmmmmmmmmmmmmmmm\n";
   CudnnGraph cudnnGraph(std::move(graph));
-  TF_RETURN_IF_ERROR(cudnnGraph.Prepare(
-      dnn_support, NumericOptions{/*require_determinism=*/false,
-                                  /*allow_tf32=*/true}));
+   std::cout << "mmmmmmmmmmmmmmmmmmmmm22222222222222\n";
+  TF_RETURN_IF_ERROR(cudnnGraph.Prepare(dnn_support,
+         NumericOptions{/*require_determinism=*/false,
+                                 /*allow_tf32=*/true}));
+                                  std::cout << "mmmmmmmmmmmmmmmmmmmmm11111111111\n";
   TF_RETURN_IF_ERROR(cudnnGraph.Build(dnn_support, /*plan_id=*/std::nullopt));
-
+  std::cout << "cccccccccccccccccccccccccc\n";
   if (VLOG_IS_ON(4)) {
     VLOG(4) << "\b workspace size:" << cudnnGraph.Graph().get_workspace_size();
     VLOG(4) << "\b flash attention operation graph: " << graph;
