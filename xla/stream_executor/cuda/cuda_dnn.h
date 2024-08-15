@@ -700,15 +700,6 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionOperationGraph(
     const std::optional<double> dropout_rate,
     const dnn::FMHAMaskKind mask_type);
 
-absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
-    dnn::DnnSupport& dnn_support,
-    const dnn::MatmulTensorDescriptor& q_descriptor,
-    const dnn::MatmulTensorDescriptor& k_descriptor,
-    const dnn::MatmulTensorDescriptor& v_descriptor,
-    const dnn::TensorDescriptor& o_descriptor,
-    const std::optional<dnn::TensorDescriptor> stats_descriptor,
-    const float scale, const dnn::FMHAMaskKind mask_type);
-
 absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionBackwardOperationGraph(
     dnn::DnnSupport& dnn_support, const dnn::MatmulTensorDescriptor& q_desc,
     const dnn::MatmulTensorDescriptor& k_desc,
@@ -721,6 +712,25 @@ absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionBackwardOperationGraph(
     std::optional<double> dropout_rate, std::optional<int64_t> seed,
     double scale, bool use_dropout, bool use_bias,
     const dnn::FMHAMaskKind mask_type, bool force_deterministic);
+
+absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionF8OperationGraph(
+    dnn::DnnSupport& dnn_support,
+    const dnn::MatmulTensorDescriptor& q_descriptor,
+    const dnn::MatmulTensorDescriptor& k_descriptor,
+    const dnn::MatmulTensorDescriptor& v_descriptor,
+    const dnn::TensorDescriptor& o_descriptor,
+    const std::optional<dnn::TensorDescriptor> stats_descriptor,
+    const float scale, const dnn::FMHAMaskKind mask_type);
+
+absl::StatusOr<CudnnGraph> GetCudnnFlashAttentionBackwardF8OperationGraph(
+    dnn::DnnSupport& dnn_support, const dnn::MatmulTensorDescriptor& q_desc,
+    const dnn::MatmulTensorDescriptor& k_desc,
+    const dnn::MatmulTensorDescriptor& p_desc,
+    const dnn::MatmulTensorDescriptor& v_desc,
+    const dnn::MatmulTensorDescriptor& do_desc,
+    const dnn::TensorDescriptor& dq_desc, const dnn::TensorDescriptor& dk_desc,
+    const dnn::TensorDescriptor& dv_desc, double scale,
+    dnn::FMHAMaskKind mask_type);
 
 }  // namespace gpu
 }  // namespace stream_executor
